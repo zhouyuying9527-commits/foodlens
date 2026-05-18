@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>食探 FoodLens</title>
+  <link rel="stylesheet" href="/lib/leaflet.css" />
+  <script src="/lib/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; height: 100vh; display: flex; overflow: hidden; }
+
+    /* 左侧面板 */
+    .panel { width: 420px; height: 100vh; background: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 12px rgba(0,0,0,0.08); z-index: 1000; position: relative; }
+
+    .panel-header { padding: 20px 24px 16px; border-bottom: 1px solid #f0f0f0; }
+    .panel-header h1 { font-size: 1.3rem; color: #1a365d; margin-bottom: 4px; }
+    .panel-header p { font-size: 0.8rem; color: #a0aec0; }
+
+    /* 筛选区 */
+    .filters { padding: 16px 24px; border-bottom: 1px solid #f0f0f0; background: #f9fafb; }
+    .filter-row { display: flex; gap: 10px; margin-bottom: 10px; }
+    .filter-row:last-child { margin-bottom: 0; }
+    .filter-item { flex: 1; }
+    .filter-item label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 4px; font-weight: 500; }
+    .filter-item select, .filter-item input { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; background: #fff; outline: none; }
+    .filter-item select:focus, .filter-item input:focus { border-color: #3b82f6; }
+    .btn-search { width: 100%; padding: 10px; background: #1a365d; color: #fff; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-search:hover { background: #2b4c7e; }
+    .btn-search:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    /* 结果列表 */
+    .results { flex: 1; overflow-y: auto; }
+    .results-header { padding: 12px 24px; font-size: 0.82rem; color: #64748b; background: #f9fafb; border-bottom: 1px solid #f0f0f0; position: sticky; top: 0; z-index: 1; }
+
+    .restaurant-card { padding: 16px 24px; border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: background 0.15s; }
+    .restaurant-card:hover { background: #f8fafc; }
+    .restaurant-card.active { background: #eff6ff; border-left: 3px solid #3b82f6; }
+    .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+    .card-name { font-size: 0.95rem; font-weight: 600; color: #1e293b; flex: 1; }
+    .card-rating { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; margin-left: 8px; }
+    .card-meta { font-size: 0.78rem; color: #94a3b8; display: flex; gap: 12px; }
+    .card-xhs { margin-top: 8px; font-size: 0.8rem; padding: 6px 10px; background: #fef2f2; border-radius: 6px; color: #dc2626; display: none; }
+    .card-xhs.loaded { display: block; }
+    .card-xhs.recommend { background: #ecfdf5; color: #059669; }
+    .card-xhs.caution { background: #fffbeb; color: #d97706; }
+    .card-xhs.avoid { background: #fef2f2; color: #dc2626; }
+
+    /* 右侧详情面板 */
+    .detail-panel { display: none; width: 420px; height: 100vh; background: #fff; box-shadow: 2px 0 12px rgba(0,0,0,0.08); overflow-y: auto; z-index: 999; flex-shrink: 0; }
+    .detail-panel.active { display: block; }
+    .detail-close { position: absolute; top: 16px; right: 16px; width: 32px; height: 32px; background: #f1f5f9; border: none; border-radius: 50%; font-size: 1.1rem; cursor: pointer; z-index: 1; display: flex; align-items: center; justify-content: center; }
+
+    /* POI Header */
+    .poi-header { padding: 0; position: relative; }
+    .poi-photos { display: flex; overflow-x: auto; gap: 2px; height: 180px; background: #f1f5f9; }
+    .poi-photos img { height: 100%; min-width: 180px; object-fit: cover; flex-shrink: 0; }
+    .poi-photos .no-photo { display: flex; align-items: center; justify-content: center; width: 100%; color: #94a3b8; font-size: 0.85rem; }
+    .poi-info { padding: 20px 24px 16px; }
+    .poi-name { font-size: 1.2rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .poi-type { font-size: 0.8rem; color: #94a3b8; margin-bottom: 10px; }
+    .poi-stats { display: flex; gap: 16px; margin-bottom: 12px; }
+    .poi-stat { font-size: 0.82rem; color: #64748b; }
+    .poi-stat strong { color: #1e293b; }
+
+    /* POI 营业状态 */
+    .poi-status { padding: 12px 24px; border-top: 1px solid #f0f0f0; border-bottom: 1px solid #f0f0f0; }
+    .poi-status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer; }
+    .poi-status-row:last-child { margin-bottom: 0; }
+    .poi-status-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .poi-status-dot.open { background: #10b981; }
+    .poi-status-dot.closed { background: #ef4444; }
+    .poi-status-text { font-size: 0.85rem; color: #334155; flex: 1; }
+    .poi-status-toggle { font-size: 0.75rem; color: #94a3b8; transition: transform 0.2s; }
+    .poi-status-toggle.expanded { transform: rotate(180deg); }
+    .poi-hours { font-size: 0.78rem; color: #64748b; margin-top: 6px; display: none; }
+    .poi-hours.expanded { display: block; }
+    .poi-hours-item { padding: 3px 0; display: flex; justify-content: space-between; }
+    .poi-hours-day { color: #94a3b8; }
+
+    /* POI 基本信息 */
+    .poi-meta { padding: 12px 24px; border-bottom: 1px solid #f0f0f0; }
+    .poi-meta-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 0.82rem; color: #475569; }
+    .poi-meta-icon { width: 16px; color: #94a3b8; text-align: center; }
+
+    /* 分割标签 */
+    .section-tab { display: flex; border-bottom: 2px solid #f0f0f0; padding: 0 24px; }
+    .section-tab-item { padding: 12px 16px; font-size: 0.85rem; font-weight: 600; color: #94a3b8; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .section-tab-item.active { color: #1a365d; border-bottom-color: #1a365d; }
+    .section-tab-item.xhs { color: #ff4757; border-bottom-color: #ff4757; }
+
+    .detail-loading { padding: 40px; text-align: center; }
+    .detail-loading .spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .xhs-result { padding: 20px 24px; }
+    .xhs-badge { display: inline-block; padding: 6px 14px; border-radius: 16px; font-weight: 700; font-size: 0.9rem; margin-bottom: 16px; }
+    .xhs-badge.strongly_recommend { background: #d1fae5; color: #065f46; }
+    .xhs-badge.recommend { background: #ecfdf5; color: #047857; }
+    .xhs-badge.caution { background: #fef3c7; color: #92400e; }
+    .xhs-badge.avoid { background: #fee2e2; color: #991b1b; }
+    .xhs-badge.unknown { background: #f1f5f9; color: #475569; }
+
+    .xhs-section { margin-bottom: 0; }
+    .xhs-section h4 { font-size: 0.82rem; color: #64748b; margin-bottom: 8px; font-weight: 600; }
+
+    /* 板块化卡片 */
+    .xhs-block { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid #f0f0f0; }
+    .xhs-block-title { font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 10px; letter-spacing: 0.5px; }
+
+    /* 中国胃指数 */
+    .stomach-stars { font-size: 1rem; letter-spacing: 2px; margin-bottom: 4px; }
+    .stomach-reason { font-size: 0.78rem; color: #78350f; line-height: 1.4; }
+
+    /* 推荐菜品 */
+    .dish-item { padding: 8px 0; }
+    .dish-name { font-weight: 600; color: #1e293b; font-size: 0.88rem; margin-bottom: 2px; }
+    .dish-reason { color: #64748b; font-size: 0.8rem; line-height: 1.5; }
+
+    /* 好评/差评 */
+    .pros-cons-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .pros-cons-col h5 { font-size: 0.8rem; font-weight: 600; margin-bottom: 8px; }
+    .pros-cons-col h5.pro-title { color: #10b981; }
+    .pros-cons-col h5.con-title { color: #ef4444; }
+    .xhs-pros li { list-style: none; padding: 4px 0 4px 18px; text-indent: -18px; font-size: 0.83rem; color: #334155; line-height: 1.5; }
+    .xhs-pros li::before { content: "\2713"; color: #10b981; font-weight: 700; margin-right: 4px; }
+    .xhs-cons li { list-style: none; padding: 4px 0 4px 18px; text-indent: -18px; font-size: 0.83rem; color: #334155; line-height: 1.5; }
+    .xhs-cons li::before { content: "\2717"; color: #ef4444; font-weight: 700; margin-right: 4px; }
+
+    /* 实用信息 */
+    .xhs-practical { background: #f8fafc; border-radius: 8px; padding: 0; }
+    .xhs-practical-item { font-size: 0.82rem; color: #475569; padding: 6px 0; display: flex; gap: 6px; border-bottom: 1px solid #f0f0f0; }
+    .xhs-practical-item:last-child { border-bottom: none; }
+    .xhs-practical-item .label { color: #94a3b8; white-space: nowrap; flex-shrink: 0; }
+
+    .xhs-notes { border-top: 1px solid #f0f0f0; padding-top: 16px; }
+    .xhs-note { padding: 8px 0; border-bottom: 1px solid #f9fafb; }
+    .xhs-note-title { font-size: 0.83rem; font-weight: 500; color: #334155; }
+    .xhs-note-desc { font-size: 0.78rem; color: #94a3b8; margin-top: 2px; }
+
+    .xhs-meta { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f0f0f0; font-size: 0.75rem; color: #94a3b8; }
+
+    /* Google 评论 */
+    .google-reviews { padding: 16px 24px; }
+    .google-review { padding: 12px 0; border-bottom: 1px solid #f9fafb; }
+    .google-review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .google-review-author { font-size: 0.82rem; font-weight: 500; color: #334155; }
+    .google-review-rating { font-size: 0.78rem; color: #f59e0b; }
+    .google-review-text { font-size: 0.8rem; color: #64748b; line-height: 1.4; }
+    .google-review-date { font-size: 0.72rem; color: #94a3b8; margin-top: 4px; }
+
+    /* 地图 */
+    .map-container { flex: 1; height: 100vh; position: relative; }
+    #map { width: 100%; height: 100%; }
+
+    .location-banner { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: #fff; padding: 10px 20px; border-radius: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12); font-size: 0.85rem; color: #64748b; z-index: 800; display: none; }
+    .location-banner.active { display: block; }
+
+    /* Marker styles */
+    .custom-marker { background: #1a365d; color: #fff; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+    .custom-marker.highlight { background: #3b82f6; transform: scale(1.2); }
+
+    /* Empty state */
+    .empty-state { padding: 60px 24px; text-align: center; color: #94a3b8; }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-state p { font-size: 0.88rem; line-height: 1.6; }
+
+    @media (max-width: 900px) {
+      .panel { width: 320px; }
+      .detail-panel { width: 320px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 左侧面板：筛选 + 结果列表 -->
+  <div class="panel">
+    <div class="panel-header">
+      <h1>食探 FoodLens</h1>
+      <p>发现附近好评餐厅 · 小红书口碑一键查看</p>
+    </div>
+
+    <div class="filters">
+      <div class="filter-row">
+        <div class="filter-item" style="flex:2;">
+          <label>位置</label>
+          <select id="filterLocation">
+            <option value="auto">点击地图选点 / 自动定位</option>
+            <option value="48.8566,2.3522" selected>巴黎 Paris</option>
+            <option value="35.6762,139.6503">东京 Tokyo</option>
+            <option value="13.7563,100.5018">曼谷 Bangkok</option>
+            <option value="40.7128,-74.0060">纽约 New York</option>
+            <option value="51.5074,-0.1278">伦敦 London</option>
+            <option value="37.5665,126.9780">首尔 Seoul</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label>搜索半径</label>
+          <select id="filterRadius">
+            <option value="500">500m</option>
+            <option value="1000" selected>1km</option>
+            <option value="2000">2km</option>
+            <option value="5000">5km</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-row">
+        <div class="filter-item">
+          <label>最低评分</label>
+          <select id="filterRating">
+            <option value="0">不限</option>
+            <option value="3.5">3.5+</option>
+            <option value="4.0">4.0+</option>
+            <option value="4.5" selected>4.5+</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label>最少评论</label>
+          <select id="filterReviews">
+            <option value="0">不限</option>
+            <option value="100">100+</option>
+            <option value="500" selected>500+</option>
+            <option value="1000">1000+</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-row">
+        <button class="btn-search" id="btnSearch" onclick="searchNearby()">搜索附近餐厅</button>
+      </div>
+    </div>
+
+    <div class="results" id="results">
+      <div class="empty-state">
+        <div class="icon">📍</div>
+        <p>正在获取你的位置...<br>请允许浏览器定位权限</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧详情面板（POI 改造版）-->
+  <div class="detail-panel" id="detailPanel">
+    <button class="detail-close" onclick="closeDetail()">&times;</button>
+    <div class="poi-header">
+      <div class="poi-photos" id="poiPhotos"><div class="no-photo">加载中...</div></div>
+      <div class="poi-info" id="poiInfo"></div>
+    </div>
+    <div class="poi-status" id="poiStatus"></div>
+    <div class="poi-meta" id="poiMeta"></div>
+    <div class="section-tab" id="sectionTab">
+      <div class="section-tab-item xhs active" data-tab="xhs" onclick="switchTab('xhs')">小红书口碑</div>
+      <div class="section-tab-item" data-tab="google" onclick="switchTab('google')">Google 评论</div>
+    </div>
+    <div id="tabContent"></div>
+  </div>
+
+  <!-- 地图 -->
+  <div class="map-container">
+    <div class="location-banner" id="locationBanner">正在定位中...</div>
+    <div id="map"></div>
+  </div>
+
+  <script>
+    // ── State ──
+    let map, userLat, userLng;
+    let restaurants = [];
+    let markers = [];
+    let userMarker = null;
+    let selectedRestaurant = null;
+
+    // ── Update User Location ──
+    function updateUserLocation(lat, lng, source) {
+      userLat = lat;
+      userLng = lng;
+
+      // 移除旧的用户位置标记
+      if (userMarker) map.removeLayer(userMarker);
+
+      // 添加新标记
+      userMarker = L.circleMarker([lat, lng], {
+        radius: 8, fillColor: "#3b82f6", color: "#fff", weight: 2, fillOpacity: 1,
+      }).addTo(map).bindPopup(`📍 ${source}<br>${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+
+      map.setView([lat, lng], map.getZoom());
+
+      // banner 提示
+      const banner = document.getElementById("locationBanner");
+      banner.textContent = `📍 ${source}: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      banner.classList.add("active");
+      setTimeout(() => banner.classList.remove("active"), 2500);
+    }
+
+    // ── Init Map ──
+    function initMap() {
+      // 默认巴黎
+      userLat = 48.8566;
+      userLng = 2.3522;
+
+      map = L.map("map").setView([userLat, userLng], 14);
+
+      // 优先使用本地代理（解决国内网络问题），fallback 到 CartoDB 直连
+      const proxyTiles = L.tileLayer("/tiles/{z}/{x}/{y}", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        maxZoom: 20,
+        crossOrigin: true,
+      });
+
+      const cartoTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: "abcd",
+        maxZoom: 20,
+      });
+
+      // 先试代理瓦片
+      proxyTiles.addTo(map);
+
+      // 监测瓦片加载状态
+      let tileLoadFailed = 0;
+      let tileLoadOK = 0;
+      proxyTiles.on("tileerror", () => {
+        tileLoadFailed++;
+        if (tileLoadFailed > 3 && tileLoadOK === 0) {
+          // 代理也失败了，提示用户
+          const banner = document.getElementById("locationBanner");
+          banner.textContent = "⚠️ 地图瓦片加载失败，请开启VPN后刷新页面";
+          banner.classList.add("active");
+        }
+      });
+      proxyTiles.on("tileload", () => { tileLoadOK++; });
+
+      // 初始位置标记
+      userMarker = L.circleMarker([userLat, userLng], {
+        radius: 8, fillColor: "#3b82f6", color: "#fff", weight: 2, fillOpacity: 1,
+      }).addTo(map).bindPopup("当前位置（默认巴黎市中心）");
+
+      // 尝试自动定位（国外可用）
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            updateUserLocation(pos.coords.latitude, pos.coords.longitude, "GPS定位");
+            document.getElementById("filterLocation").value = "auto";
+          },
+          () => {
+            console.log("自动定位失败，使用默认城市");
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      }
+
+      // 监听城市切换
+      document.getElementById("filterLocation").addEventListener("change", (e) => {
+        if (e.target.value !== "auto") {
+          const [lat, lng] = e.target.value.split(",").map(Number);
+          updateUserLocation(lat, lng, "城市选择");
+        }
+      });
+
+      // 点击地图选点
+      map.on("click", (e) => {
+        updateUserLocation(e.latlng.lat, e.latlng.lng, "地图选点");
+        // 切换下拉框到"自定义"
+        document.getElementById("filterLocation").value = "auto";
+      });
+
+      document.getElementById("results").innerHTML = `
+        <div class="empty-state">
+          <div class="icon">🍜</div>
+          <p>选择城市或点击地图选择精确位置<br>设置筛选条件后点击「搜索附近餐厅」</p>
+        </div>`;
+    }
+
+    // ── Search Nearby ──
+    async function searchNearby() {
+      if (!userLat || !userLng) {
+        alert("请先允许定位权限");
+        return;
+      }
+
+      const radius = document.getElementById("filterRadius").value;
+      const minRating = document.getElementById("filterRating").value;
+      const minReviews = document.getElementById("filterReviews").value;
+      const btn = document.getElementById("btnSearch");
+
+      btn.disabled = true;
+      btn.textContent = "搜索中...";
+      document.getElementById("results").innerHTML = `
+        <div class="empty-state"><div class="icon">⏳</div><p>正在搜索附近餐厅...</p></div>`;
+
+      try {
+        const params = new URLSearchParams({ lat: userLat, lng: userLng, radius, minRating, minReviews });
+        const res = await fetch(`/api/nearby?${params}`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error);
+
+        restaurants = data.restaurants;
+        renderRestaurants();
+        renderMarkers();
+
+        // 调整地图视野
+        if (restaurants.length > 0) {
+          const bounds = L.latLngBounds(restaurants.map((r) => [r.lat, r.lng]));
+          bounds.extend([userLat, userLng]);
+          map.fitBounds(bounds, { padding: [50, 50] });
+        }
+      } catch (err) {
+        document.getElementById("results").innerHTML = `
+          <div class="empty-state"><div class="icon">❌</div><p>搜索失败: ${err.message}</p></div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "搜索附近餐厅";
+      }
+    }
+
+    // ── Render Restaurant List ──
+    function renderRestaurants() {
+      const container = document.getElementById("results");
+
+      if (restaurants.length === 0) {
+        container.innerHTML = `<div class="empty-state"><div class="icon">🤷</div><p>当前条件下没有找到餐厅<br>试试降低筛选条件或扩大搜索半径？</p></div>`;
+        return;
+      }
+
+      container.innerHTML = `<div class="results-header">找到 ${restaurants.length} 家餐厅，按评分排序</div>` +
+        restaurants.map((r, i) => `
+          <div class="restaurant-card" id="card-${i}" onclick="selectRestaurant(${i})">
+            <div class="card-top">
+              <div class="card-name">${r.name}</div>
+              <div class="card-rating">⭐ ${r.rating}</div>
+            </div>
+            <div class="card-meta">
+              <span>${r.userRatingsTotal} 条评论</span>
+              <span>${r.distance ? formatDistance(r.distance) : ""}</span>
+              ${r.openNow === false ? '<span style="color:#ef4444">已打烊</span>' : ""}
+            </div>
+            <div class="card-meta" style="margin-top:4px;">
+              <span style="color:#94a3b8;font-size:0.75rem">${r.address || ""}</span>
+            </div>
+            <div class="card-xhs" id="xhs-${i}"></div>
+          </div>
+        `).join("");
+    }
+
+    function formatDistance(meters) {
+      if (meters < 1000) return `${meters}m`;
+      return `${(meters / 1000).toFixed(1)}km`;
+    }
+
+    // ── Render Map Markers ──
+    function renderMarkers() {
+      // 清除旧标记
+      markers.forEach((m) => map.removeLayer(m));
+      markers = [];
+
+      restaurants.forEach((r, i) => {
+        const icon = L.divIcon({
+          className: "",
+          html: `<div class="custom-marker" id="marker-${i}">${r.rating}</div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+
+        const marker = L.marker([r.lat, r.lng], { icon })
+          .addTo(map)
+          .on("click", () => selectRestaurant(i));
+
+        markers.push(marker);
+      });
+    }
+
+    // ── Select Restaurant → Load POI Detail + XHS Review ──
+    let currentPoiData = null;
+    let currentXhsData = null;
+    let requestId = 0;
+
+    async function selectRestaurant(index) {
+      const r = restaurants[index];
+      selectedRestaurant = index;
+
+      // 高亮卡片
+      document.querySelectorAll(".restaurant-card").forEach((c) => c.classList.remove("active"));
+      document.getElementById(`card-${index}`)?.classList.add("active");
+
+      // 高亮 marker
+      document.querySelectorAll(".custom-marker").forEach((m) => m.classList.remove("highlight"));
+      document.getElementById(`marker-${index}`)?.classList.add("highlight");
+
+      // 地图居中
+      map.panTo([r.lat, r.lng]);
+
+      // 打开详情面板
+      const panel = document.getElementById("detailPanel");
+      panel.classList.add("active");
+
+      // 初始显示基本信息（从列表数据）
+      document.getElementById("poiPhotos").innerHTML = r.photos && r.photos.length
+        ? r.photos.map((p) => `<img src="${p}" alt="${r.name}">`).join("")
+        : `<div class="no-photo">加载图片中...</div>`;
+
+      document.getElementById("poiInfo").innerHTML = `
+        <div class="poi-name">${r.name}</div>
+        <div class="poi-type">${r.types ? r.types.join(" · ") : "餐厅"}</div>
+        <div class="poi-stats">
+          <div class="poi-stat"><strong>${r.rating}</strong> Google评分</div>
+          <div class="poi-stat"><strong>${r.userRatingsTotal}</strong> 条评论</div>
+          ${r.distance ? `<div class="poi-stat"><strong>${formatDistance(r.distance)}</strong></div>` : ""}
+          ${r.priceLevel ? `<div class="poi-stat"><strong>${"$".repeat(r.priceLevel)}</strong></div>` : ""}
+        </div>`;
+
+      document.getElementById("poiStatus").innerHTML = `<div class="poi-status-row"><span style="font-size:0.82rem;color:#94a3b8">加载营业信息中...</span></div>`;
+      document.getElementById("poiMeta").innerHTML = `<div class="poi-meta-item"><span style="color:#94a3b8">${r.address || ""}</span></div>`;
+      document.getElementById("tabContent").innerHTML = `
+        <div class="detail-loading">
+          <div class="spinner"></div>
+          <p style="color:#64748b;font-size:0.85rem">正在获取详细信息...</p>
+        </div>`;
+
+      // 并行请求 POI 详情 和 小红书评价
+      currentPoiData = null;
+      currentXhsData = null;
+
+      // 默认 tab（必须在重置后调用，否则会显示旧数据）
+      switchTab("xhs");
+
+      requestId++;
+      const thisId = requestId;
+
+      const poiPromise = fetchPoiDetail(r.placeId);
+      const xhsPromise = fetchXhsReview(r.name, index);
+
+      // POI 详情回来后更新面板上半部分
+      poiPromise.then((poi) => {
+        if (thisId !== requestId) return;
+        currentPoiData = poi;
+        if (poi) renderPoiHeader(poi, r);
+      });
+
+      // 小红书评价回来后更新下半部分
+      xhsPromise.then((xhs) => {
+        if (thisId !== requestId) return;
+        currentXhsData = xhs;
+        if (xhs) {
+          renderTabContent("xhs");
+          const cardXhs = document.getElementById(`xhs-${index}`);
+          if (cardXhs) {
+            const rating = xhs.rating || "unknown";
+            cardXhs.className = `card-xhs loaded ${rating}`;
+            cardXhs.textContent = `小红书: ${getRatingLabel(rating)} · ${xhs.noteCount || 0}条笔记`;
+          }
+        }
+      });
+    }
+
+    async function fetchPoiDetail(placeId) {
+      if (!placeId) return null;
+      try {
+        const res = await fetch(`/api/place-detail?placeId=${encodeURIComponent(placeId)}`);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch (e) {
+        console.error("POI 详情获取失败:", e);
+        return null;
+      }
+    }
+
+    async function fetchXhsReview(name, index) {
+      try {
+        const params = new URLSearchParams({ name, city: getCityFromLocation() });
+        const res = await fetch(`/api/review?${params}`);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch (e) {
+        console.error("小红书评价获取失败:", e);
+        return null;
+      }
+    }
+
+    function renderPoiHeader(poi, r) {
+      // 图片
+      if (poi.photos && poi.photos.length > 0) {
+        document.getElementById("poiPhotos").innerHTML = poi.photos.map((p) => `<img src="${p}" alt="${poi.name}">`).join("");
+      }
+
+      // 营业状态
+      const isOpen = poi.openState && (poi.openState.toLowerCase().includes("open") || poi.openState.includes("营业"));
+      const statusDot = isOpen ? "open" : "closed";
+      let statusHtml = `<div class="poi-status-row" onclick="toggleHours()">
+        <div class="poi-status-dot ${statusDot}"></div>
+        <div class="poi-status-text">${poi.openState || "营业状态未知"}</div>
+        ${poi.hours && poi.hours.length ? `<span class="poi-status-toggle" id="hoursToggle">▼</span>` : ""}
+      </div>`;
+
+      if (poi.hours && poi.hours.length > 0) {
+        statusHtml += `<div class="poi-hours" id="poiHoursDetail">`;
+        poi.hours.forEach((h) => {
+          statusHtml += `<div class="poi-hours-item"><span class="poi-hours-day">${h.day}</span><span>${h.hours}</span></div>`;
+        });
+        statusHtml += `</div>`;
+      }
+      document.getElementById("poiStatus").innerHTML = statusHtml;
+
+      // 基本信息
+      let metaHtml = "";
+      if (poi.address) metaHtml += `<div class="poi-meta-item"><span class="poi-meta-icon">📍</span>${poi.address}</div>`;
+      if (poi.phone) metaHtml += `<div class="poi-meta-item"><span class="poi-meta-icon">📞</span>${poi.phone}</div>`;
+      if (poi.website) metaHtml += `<div class="poi-meta-item"><span class="poi-meta-icon">🌐</span><a href="${poi.website}" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:0.82rem;">${poi.website.replace(/https?:\/\//, "").slice(0, 40)}</a></div>`;
+      if (poi.priceLevel) metaHtml += `<div class="poi-meta-item"><span class="poi-meta-icon">💰</span>${poi.priceLevel}</div>`;
+      document.getElementById("poiMeta").innerHTML = metaHtml || `<div class="poi-meta-item"><span class="poi-meta-icon">📍</span>${r.address || ""}</div>`;
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll(".section-tab-item").forEach((t) => {
+        t.classList.toggle("active", t.dataset.tab === tab);
+        if (t.dataset.tab === "xhs") t.classList.toggle("xhs", t.dataset.tab === tab);
+      });
+      renderTabContent(tab);
+    }
+
+    function renderTabContent(tab) {
+      const container = document.getElementById("tabContent");
+
+      if (tab === "xhs") {
+        if (!currentXhsData) {
+          container.innerHTML = `<div class="detail-loading"><div class="spinner"></div><p style="color:#64748b;font-size:0.85rem">正在搜索小红书评价...</p></div>`;
+          return;
+        }
+        renderXhsResult(currentXhsData);
+      } else if (tab === "google") {
+        if (!currentPoiData || !currentPoiData.googleReviews || currentPoiData.googleReviews.length === 0) {
+          container.innerHTML = `<div class="google-reviews"><p style="color:#94a3b8;font-size:0.85rem;padding:20px 0;">暂无 Google 评论数据</p></div>`;
+          return;
+        }
+        let html = `<div class="google-reviews">`;
+        currentPoiData.googleReviews.forEach((rev) => {
+          html += `<div class="google-review">
+            <div class="google-review-header">
+              <span class="google-review-author">${rev.author}</span>
+              <span class="google-review-rating">${"★".repeat(rev.rating)}${"☆".repeat(5 - rev.rating)}</span>
+            </div>
+            ${rev.text ? `<div class="google-review-text">${rev.text}</div>` : ""}
+            ${rev.date ? `<div class="google-review-date">${rev.date}</div>` : ""}
+          </div>`;
+        });
+        html += `</div>`;
+        container.innerHTML = html;
+      }
+    }
+
+    // ── Render XHS Review Result ──
+    function renderXhsResult(data) {
+      const rating = data.rating || "unknown";
+      const ratingLabel = data.ratingLabel || getRatingLabel(rating);
+
+      // 构建实用信息（含预订）
+      const practicalItems = [];
+      if (data.needReservation && data.needReservation !== "未提及") {
+        practicalItems.push({ label: "预订", value: data.needReservation });
+      }
+      if (data.practicalInfo) {
+        Object.entries(data.practicalInfo).forEach(([k, v]) => {
+          if (v && v !== "null" && v !== null && v !== "未提及") {
+            practicalItems.push({ label: getLabelCN(k), value: v });
+          }
+        });
+      }
+
+      const notesHtml = (data.rawNotes || [])
+        .map((n) => {
+          const titleHtml = n.link
+            ? `<a href="${n.link}" target="_blank" class="xhs-note-title" style="color:#334155;text-decoration:none;border-bottom:1px dashed #94a3b8;">${n.title}</a>`
+            : `<div class="xhs-note-title">${n.title}</div>`;
+          return `<div class="xhs-note">${titleHtml}${n.desc ? `<div class="xhs-note-desc">${n.desc}</div>` : ""}</div>`;
+        })
+        .join("");
+
+      document.getElementById("tabContent").innerHTML = `
+        <div class="xhs-result">
+          ${data.rating === "no_data" ? `
+            <div class="xhs-badge unknown">待探索</div>
+            <div style="font-size:0.92rem;color:#64748b;line-height:1.6;margin-bottom:16px;">还没有人发现这家宝藏店铺，来做第一个吃🦀的人吧！</div>
+            ${data.irrelevantNotes && data.irrelevantNotes.length ? `<div style="font-size:0.78rem;color:#94a3b8;margin-top:8px;">搜索到 ${data.noteCount} 条笔记，但均与该餐厅无关</div>` : ""}
+          ` : `
+            <div class="xhs-badge ${rating}">${ratingLabel}</div>
+
+            <!-- 板块1: 中国胃指数 -->
+            ${data.chineseStomachIndex ? `
+            <div class="xhs-block" style="background:#fff7ed;border-color:#fed7aa;">
+              <div class="xhs-block-title" style="color:#9a3412;">中国胃指数</div>
+              <div class="stomach-stars">${"🌟".repeat(data.chineseStomachIndex.score || 0)}</div>
+              <div class="stomach-reason">${data.chineseStomachIndex.reason || ""}</div>
+            </div>` : ""}
+
+            <!-- 板块2: 推荐菜品 -->
+            ${data.recommendedDishes && data.recommendedDishes.length ? `
+            <div class="xhs-block">
+              <div class="xhs-block-title" style="color:#059669;">推荐菜品</div>
+              ${data.recommendedDishes.map((d) => `<div class="dish-item"><div class="dish-name">${d.name}</div>${d.reason ? `<div class="dish-reason">${d.reason}</div>` : ""}</div>`).join("")}
+            </div>` : ""}
+
+            <!-- 板块3: 好评/差评要点 -->
+            ${(data.pros && data.pros.length) || (data.cons && data.cons.length) ? `
+            <div class="xhs-block">
+              <div class="pros-cons-grid">
+                <div class="pros-cons-col">
+                  <h5 class="pro-title">好评要点</h5>
+                  <ul class="xhs-pros">${(data.pros || []).map((p) => `<li>${p}</li>`).join("") || "<li>暂无</li>"}</ul>
+                </div>
+                <div class="pros-cons-col">
+                  <h5 class="con-title">差评/注意</h5>
+                  <ul class="xhs-cons">${(data.cons || []).map((c) => `<li>${c}</li>`).join("") || "<li>暂无</li>"}</ul>
+                </div>
+              </div>
+            </div>` : ""}
+
+            <!-- 板块4: 实用信息（含预订） -->
+            ${practicalItems.length ? `
+            <div class="xhs-block">
+              <div class="xhs-block-title">实用信息</div>
+              ${practicalItems.map((item) => `<div class="xhs-practical-item"><span class="label">${item.label}:</span> ${item.value}</div>`).join("")}
+            </div>` : ""}
+          `}
+
+          ${notesHtml ? `<div class="xhs-block" style="border-color:#f0f0f0;"><div class="xhs-block-title">相关笔记 (${data.relevantNoteCount || data.noteCount || 0}条相关)</div>${notesHtml}</div>` : ""}
+
+          <div class="xhs-meta">
+            搜索关键词: ${(data.keywords || []).join(" / ")} | 耗时 ${((data.elapsedMs || 0) / 1000).toFixed(1)}s
+            ${data.dataSource === "demo" ? " | Demo数据" : " | 小红书实时数据"}
+            ${data.irrelevantNotes && data.irrelevantNotes.length ? ` | 过滤${data.irrelevantNotes.length}条无关笔记` : ""}
+          </div>
+        </div>`;
+    }
+
+    function closeDetail() {
+      document.getElementById("detailPanel").classList.remove("active");
+      document.querySelectorAll(".restaurant-card").forEach((c) => c.classList.remove("active"));
+      document.querySelectorAll(".custom-marker").forEach((m) => m.classList.remove("highlight"));
+    }
+
+    function toggleHours() {
+      const detail = document.getElementById("poiHoursDetail");
+      const toggle = document.getElementById("hoursToggle");
+      if (detail) {
+        detail.classList.toggle("expanded");
+        if (toggle) toggle.classList.toggle("expanded");
+      }
+    }
+
+    function getCityFromLocation() {
+      if (!userLat) return "Paris";
+      if (userLat > 35 && userLat < 36 && userLng > 139 && userLng < 140) return "东京";
+      if (userLat > 13 && userLat < 14 && userLng > 100 && userLng < 101) return "曼谷";
+      if (userLat > 48 && userLat < 49 && userLng > 2 && userLng < 3) return "巴黎";
+      if (userLat > 40 && userLat < 41 && userLng > -75 && userLng < -73) return "纽约";
+      if (userLat > 51 && userLat < 52 && userLng > -1 && userLng < 0) return "伦敦";
+      if (userLat > 37 && userLat < 38 && userLng > 126 && userLng < 127) return "首尔";
+      return "Paris";
+    }
+
+    function getRatingLabel(r) {
+      return { strongly_recommend: "强烈推荐", recommend: "推荐", caution: "谨慎", avoid: "避雷" }[r] || "分析中";
+    }
+    function getLabelCN(k) {
+      return { avgPrice: "人均", waitTime: "排队", paymentMethod: "支付方式", chineseMenu: "中文菜单", tips: "贴士" }[k] || k;
+    }
+
+    // ── Boot ──
+    initMap();
+  </script>
+</body>
+</html>
