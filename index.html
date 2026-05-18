@@ -296,35 +296,12 @@
 
       map = L.map("map").setView([userLat, userLng], 14);
 
-      // 优先使用本地代理（解决国内网络问题），fallback 到 CartoDB 直连
-      const proxyTiles = L.tileLayer("/tiles/{z}/{x}/{y}", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        maxZoom: 20,
-        crossOrigin: true,
-      });
-
-      const cartoTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      // 使用 CartoDB 瓦片（需要 VPN）
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
         subdomains: "abcd",
         maxZoom: 20,
-      });
-
-      // 先试代理瓦片
-      proxyTiles.addTo(map);
-
-      // 监测瓦片加载状态
-      let tileLoadFailed = 0;
-      let tileLoadOK = 0;
-      proxyTiles.on("tileerror", () => {
-        tileLoadFailed++;
-        if (tileLoadFailed > 3 && tileLoadOK === 0) {
-          // 代理也失败了，提示用户
-          const banner = document.getElementById("locationBanner");
-          banner.textContent = "⚠️ 地图瓦片加载失败，请开启VPN后刷新页面";
-          banner.classList.add("active");
-        }
-      });
-      proxyTiles.on("tileload", () => { tileLoadOK++; });
+      }).addTo(map);
 
       // 初始位置标记
       userMarker = L.circleMarker([userLat, userLng], {
