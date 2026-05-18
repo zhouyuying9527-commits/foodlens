@@ -1,11 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/nearby", "destination": "/api/nearby.js" },
-    { "source": "/api/place-detail", "destination": "/api/place-detail.js" },
-    { "source": "/api/review", "destination": "/api/review.js" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "env": {
-    "NODE_TLS_REJECT_UNAUTHORIZED": "0"
-  }
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ]
 }
