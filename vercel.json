@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "rewrites": [
     { "source": "/api/nearby", "destination": "/api/nearby.js" },
     { "source": "/api/place-detail", "destination": "/api/place-detail.js" },
@@ -7,10 +6,5 @@
   ],
   "env": {
     "NODE_TLS_REJECT_UNAUTHORIZED": "0"
-  },
-  "buildCommand": "echo 'skip build'",
-  "outputDirectory": "public",
-  "github": {
-    "silent": true
   }
 }
