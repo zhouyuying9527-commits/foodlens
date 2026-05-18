@@ -1,8 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/lib/(.*)", "destination": "/client/lib/$1" },
-    { "source": "/(.*)", "destination": "/client/$1" }
+    { "source": "/api/(.*)", "destination": "/api/$1" }
   ],
   "env": {
     "NODE_TLS_REJECT_UNAUTHORIZED": "0"
