@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "食探 FoodLens - Google Maps x 小红书海外餐厅智能决策助手",
   "scripts": {
-    "build": "true"
+    "dev": "npx serve . -l 3000"
   },
   "dependencies": {
     "openai": "^4.20.0"

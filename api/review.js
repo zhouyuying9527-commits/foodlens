@@ -92,7 +92,7 @@ async function fetchXhsNotes(keywords) {
   const scraperUrl = process.env.SCRAPER_URL;
   if (!scraperUrl) {
     console.log("[Vercel Review] 无爬虫服务地址，使用 demo 数据");
-    return { notes: getDemoNotes(keywords[0]), fallback: true, message: null };
+    return { notes: getDemoNotes(keywords[0]), fallback: true, message: "小红书爬虫服务未部署，当前为示例数据" };
   }
 
   try {
@@ -115,7 +115,7 @@ async function fetchXhsNotes(keywords) {
     return { notes: getDemoNotes(keywords[0]), fallback: true, message: "该餐厅暂未采集到小红书笔记" };
   } catch (err) {
     console.log(`[Vercel Review] 爬虫服务不可用: ${err.message}，降级 demo`);
-    return { notes: getDemoNotes(keywords[0]), fallback: true, message: null };
+    return { notes: getDemoNotes(keywords[0]), fallback: true, message: "爬虫服务暂不可用，当前为示例数据" };
   }
 }
 
