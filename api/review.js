@@ -288,6 +288,16 @@ module.exports = async (req, res) => {
     cached: false,
     dataSource: source,
     dataSourceMessage: fallback && message ? message : null,
+    _debug: {
+      deepseekUrl: getDeepSeekUrl(),
+      hasDeepseekKey: !!process.env.DEEPSEEK_API_KEY,
+      hasSerpApiKey: !!process.env.SERPAPI_KEY,
+      deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || "(default)",
+      isVercel: !!process.env.VERCEL,
+      analysisMode: analysis.analysisMode || "ai",
+      noteSource: source,
+      noteCount: notes.length,
+    },
   };
 
   cache.set(cacheKey, { data: result, time: Date.now() });
