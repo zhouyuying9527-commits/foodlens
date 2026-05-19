@@ -1,24 +1,120 @@
 /**
  * GET /api/review
- * 小红书评价 + AI 分析
+ * 中文口碑评价 + AI 分析
  * Vercel Serverless Function
  *
- * 流程：
- * 1. DeepSeek 生成搜索关键词
- * 2. 调 Fly.io 爬虫服务获取真实小红书笔记
- * 3. DeepSeek 分析笔记
+ * 数据获取优先级：
+ * 1. 远程爬虫服务（Fly.io 小红书爬虫）
+ * 2. 本地 Playwright 爬虫（需有效 cookies）
+ * 3. SerpApi Google 搜索中文评价（从互联网获取真实评价）
+ * 4. Demo 降级数据（最后手段）
  */
 
 const cache = new Map();
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 
-// Demo 笔记（爬虫服务不可用时的降级）
+// Demo 笔记（所有真实渠道都不可用时的最后降级）
 function getDemoNotes(keyword) {
   return [
     { title: `${keyword} 实测分享｜值得专门去一趟`, desc: "环境很好，服务态度也不错。菜品口味偏清淡，适合不太能吃辣的朋友。人均大概300人民币左右。推荐他家的招牌菜，分量很足。", likes: "2.3k", author: "吃货小王", keyword },
     { title: `${keyword}｜排队2小时值不值？`, desc: "味道确实不错，但排队时间太长了。建议工作日去。点了招牌套餐，够两个人吃。服务员会说英文。", likes: "1.8k", author: "旅行日记", keyword },
     { title: `带爸妈去${keyword}，适合中国胃吗？`, desc: "带爸妈来的，老人家吃得挺开心。菜的口味不会太奇怪也不会太油腻。有热汤这点很加分。人均200-250人民币。", likes: "1.2k", author: "孝顺旅行者", keyword },
   ];
+}
+
+// SerpApi Google 搜索中文评价
+async function fetchWebReviews(name, city) {
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) return null;
+
+  try {
+    // 搜索策略：餐厅名 + 城市 + 美食相关中文关键词
+    const queries = [
+      `"${name}" ${city} 餐厅 推荐`,
+      `${name} ${city} 好吃 美食 点评`,
+    ];
+
+    const allNotes = [];
+
+    for (const q of queries) {
+      if (allNotes.length >= 8) break;
+
+      const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(q)}&hl=zh-cn&num=10&api_key=${apiKey}`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      if (!response.ok) continue;
+      const data = await response.json();
+
+      const results = data.organic_results || [];
+      for (const r of results) {
+        if (!r.snippet || r.snippet.length < 30) continue;
+        // 过滤不相关的结果
+        if (r.link?.includes('ad.xiaohongshu.com')) continue;
+        if (r.link?.includes('booking.com')) continue;
+        if (r.link?.includes('airbnb.')) continue;
+        if (r.link?.includes('hotels.com')) continue;
+        // 只保留可能包含餐厅评价的内容
+        const text = `${r.title} ${r.snippet}`.toLowerCase();
+        const foodRelated = ['餐', '美食', '吃', '味', '推荐', '菜', '好吃', '点评', 'restaurant', 'food', '厅', '馆', '料理', '米其林'].some(w => text.includes(w));
+        if (!foodRelated) continue;
+
+        allNotes.push({
+          title: r.title || '',
+          desc: r.snippet || '',
+          likes: '',
+          author: extractSource(r.link),
+          link: r.link || '',
+          keyword: name,
+        });
+      }
+    }
+
+    if (allNotes.length > 0) {
+      // 去重（按 link）
+      const seen = new Set();
+      const unique = allNotes.filter(n => {
+        if (seen.has(n.link)) return false;
+        seen.add(n.link);
+        return true;
+      });
+      console.log(`[Review] Google 搜索返回 ${unique.length} 条中文餐厅评价`);
+      return unique.slice(0, 10);
+    }
+  } catch (err) {
+    console.log(`[Review] Google 搜索失败: ${err.message}`);
+  }
+  return null;
+}
+
+function extractSource(url) {
+  if (!url) return '';
+  try {
+    const host = new URL(url).hostname.replace('www.', '');
+    const sources = {
+      'xiaohongshu.com': '小红书',
+      'tripadvisor.cn': 'TripAdvisor',
+      'tripadvisor.com': 'TripAdvisor',
+      'dianping.com': '大众点评',
+      'zhihu.com': '知乎',
+      'weibo.com': '微博',
+      'douban.com': '豆瓣',
+      'mafengwo.cn': '马蜂窝',
+      'sohu.com': '搜狐',
+      'sina.com': '新浪',
+      'threads.com': 'Threads',
+      'zhuanlan.zhihu.com': '知乎专栏',
+    };
+    for (const [domain, name] of Object.entries(sources)) {
+      if (host.includes(domain)) return name;
+    }
+    return host.split('.').slice(-2, -1)[0] || '';
+  } catch { return ''; }
+}
+
+// DeepSeek API URL 构建
+function getDeepSeekUrl() {
+  const base = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
+  if (base.includes('/chat/completions')) return base;
+  return base.replace(/\/$/, '') + '/v1/chat/completions';
 }
 
 // DeepSeek 关键词生成
@@ -28,7 +124,7 @@ async function generateKeywords(name, city) {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) return [name, `${name} ${city}`];
 
-    const response = await fetch(process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1/chat/completions", {
+    const response = await fetch(getDeepSeekUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.1, max_tokens: 150 }),
@@ -37,7 +133,7 @@ async function generateKeywords(name, city) {
     const text = data.choices?.[0]?.message?.content?.trim() || "";
     const match = text.match(/\[[\s\S]*?\]/);
     if (match) return JSON.parse(match[0]);
-  } catch (e) { /* ignore */ }
+  } catch (e) { console.log(`[Review] DeepSeek 关键词生成失败: ${e.message}`); }
   return [name, `${name} ${city}`];
 }
 
@@ -50,7 +146,7 @@ async function analyzeReviews(restaurantName, city, notes) {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) return fallbackAnalyze(notes);
 
-    const response = await fetch(process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1/chat/completions", {
+    const response = await fetch(getDeepSeekUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 1000 }),
@@ -63,7 +159,7 @@ async function analyzeReviews(restaurantName, city, notes) {
       result.noteCount = notes.length;
       return result;
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { console.log(`[Review] DeepSeek 分析失败: ${e.message}`); }
   return fallbackAnalyze(notes);
 }
 
@@ -87,36 +183,53 @@ function fallbackAnalyze(notes) {
   };
 }
 
-// 调 Fly.io 爬虫服务
-async function fetchXhsNotes(keywords) {
+// 获取中文评价：远程爬虫 → 本地 Playwright → SerpApi Google → demo
+async function fetchXhsNotes(keywords, restaurantName, city) {
   const scraperUrl = process.env.SCRAPER_URL;
-  if (!scraperUrl) {
-    console.log("[Vercel Review] 无爬虫服务地址，使用 demo 数据");
-    return { notes: getDemoNotes(keywords[0]), fallback: true, message: "小红书爬虫服务未部署，当前为示例数据" };
-  }
 
-  try {
-    const response = await fetch(`${scraperUrl}/api/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keywords, maxResults: 15 }),
-      signal: AbortSignal.timeout(30000), // 30秒超时
-    });
+  // 1. 远程爬虫服务（Fly.io 等）
+  if (scraperUrl) {
+    try {
+      const response = await fetch(`${scraperUrl}/api/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords, maxResults: 15 }),
+        signal: AbortSignal.timeout(30000),
+      });
 
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
 
-    if (data.notes && data.notes.length > 0) {
-      console.log(`[Vercel Review] 爬虫返回 ${data.notes.length} 条笔记 (${data.elapsedMs}ms)`);
-      return { notes: data.notes, fallback: false, message: null };
+      if (data.notes && data.notes.length > 0) {
+        console.log(`[Review] 远程爬虫返回 ${data.notes.length} 条笔记 (${data.elapsedMs}ms)`);
+        return { notes: data.notes, fallback: false, message: null, source: "xiaohongshu" };
+      }
+    } catch (err) {
+      console.log(`[Review] 远程爬虫不可用: ${err.message}`);
     }
-
-    console.log("[Vercel Review] 爬虫无结果，降级 demo");
-    return { notes: getDemoNotes(keywords[0]), fallback: true, message: "该餐厅暂未采集到小红书笔记" };
-  } catch (err) {
-    console.log(`[Vercel Review] 爬虫服务不可用: ${err.message}，降级 demo`);
-    return { notes: getDemoNotes(keywords[0]), fallback: true, message: "爬虫服务暂不可用，当前为示例数据" };
   }
+
+  // 2. SerpApi Google 搜索中文评价（可靠且无需登录）
+  const webNotes = await fetchWebReviews(restaurantName, city);
+  if (webNotes && webNotes.length > 0) {
+    return { notes: webNotes, fallback: false, message: null, source: "web_reviews" };
+  }
+
+  // 3. 本地 Playwright 爬虫（需有效 XHS cookies）
+  try {
+    const { searchXhs } = require('../local-scraper');
+    console.log(`[Review] 尝试本地 Playwright 爬虫...`);
+    const notes = await searchXhs(keywords, 15);
+    if (notes.length > 0) {
+      console.log(`[Review] 本地爬虫返回 ${notes.length} 条真实笔记`);
+      return { notes, fallback: false, message: null, source: "xiaohongshu" };
+    }
+  } catch (err) {
+    console.log(`[Review] 本地爬虫不可用: ${err.message}`);
+  }
+
+  // 4. 最终降级到 demo 数据
+  return { notes: getDemoNotes(keywords[0]), fallback: true, message: "暂未获取到该餐厅的中文评价数据", source: "demo" };
 }
 
 module.exports = async (req, res) => {
@@ -129,15 +242,15 @@ module.exports = async (req, res) => {
   }
 
   const start = Date.now();
-  console.log(`[Vercel Review] 开始处理: ${name} (${city})`);
+  console.log(`[Review] 开始处理: ${name} (${city})`);
 
   // 关键词生成
   const keywords = await generateKeywords(name, city);
-  console.log(`[Vercel Review] 关键词: ${keywords.join(", ")}`);
+  console.log(`[Review] 关键词: ${keywords.join(", ")}`);
 
-  // 小红书采集（优先爬虫，降级 demo）
-  const { notes, fallback, message } = await fetchXhsNotes(keywords);
-  console.log(`[Vercel Review] 采集到 ${notes.length} 条笔记${fallback ? " (demo)" : " (real)"}`);
+  // 中文评价采集（多通道）
+  const { notes, fallback, message, source } = await fetchXhsNotes(keywords, name, city);
+  console.log(`[Review] 采集到 ${notes.length} 条评价 [来源: ${source}]`);
 
   // AI 分析
   const analysis = await analyzeReviews(name, city, notes);
@@ -155,7 +268,7 @@ module.exports = async (req, res) => {
     })),
     elapsedMs: Date.now() - start,
     cached: false,
-    dataSource: fallback ? "demo" : "xiaohongshu",
+    dataSource: source,
     dataSourceMessage: fallback && message ? message : null,
   };
 

@@ -500,7 +500,7 @@
       requestId++;
       const thisId = requestId;
 
-      const poiPromise = fetchPoiDetail(r.placeId);
+      const poiPromise = fetchPoiDetail(r);
       const xhsPromise = fetchXhsReview(r.name, index);
 
       // POI 详情回来后更新面板上半部分
@@ -526,10 +526,16 @@
       });
     }
 
-    async function fetchPoiDetail(placeId) {
-      if (!placeId) return null;
+    async function fetchPoiDetail(restaurant) {
+      if (!restaurant.dataId && !restaurant.placeId) return null;
       try {
-        const res = await fetch(`/api/place-detail?placeId=${encodeURIComponent(placeId)}`);
+        const params = new URLSearchParams({
+          dataId: restaurant.dataId || "",
+          placeId: restaurant.placeId || "",
+          lat: restaurant.lat,
+          lng: restaurant.lng,
+        });
+        const res = await fetch(`/api/place-detail?${params}`);
         if (!res.ok) return null;
         return await res.json();
       } catch (e) {
@@ -699,7 +705,7 @@
 
           <div class="xhs-meta">
             搜索关键词: ${(data.keywords || []).join(" / ")} | 耗时 ${((data.elapsedMs || 0) / 1000).toFixed(1)}s
-            ${data.dataSource === "demo" ? " | Demo数据" : " | 小红书实时数据"}
+            ${data.dataSource === "demo" ? " | Demo数据" : data.dataSource === "web_reviews" ? " | 互联网中文评价" : " | 小红书实时数据"}
             ${data.irrelevantNotes && data.irrelevantNotes.length ? ` | 过滤${data.irrelevantNotes.length}条无关笔记` : ""}
           </div>
         </div>`;

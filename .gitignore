@@ -5,3 +5,4 @@ scraper-service/xhs-cookies.json
 scraper-service/node_modules/
 *.log
 .DS_Store
+debug-*.png
