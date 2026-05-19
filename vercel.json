@@ -1,4 +1,15 @@
 {
+  "functions": {
+    "api/review.js": {
+      "maxDuration": 60
+    },
+    "api/place-detail.js": {
+      "maxDuration": 30
+    },
+    "api/nearby.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     { "source": "/api/nearby", "destination": "/api/nearby" },
     { "source": "/api/place-detail", "destination": "/api/place-detail" },

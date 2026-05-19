@@ -144,21 +144,37 @@ async function analyzeReviews(restaurantName, city, notes) {
     const prompt = `你是帮助中国游客做海外餐厅决策的AI。目标餐厅：「${restaurantName}」（${city}）\n笔记：\n${notesText}\n\n请按JSON输出：{"relevantNoteCount":3,"rating":"recommend","summary":"一句话总结","chineseStomachIndex":{"score":4,"reason":"实质口味描述，禁止出现笔记[1]等指代"},"recommendedDishes":[{"name":"菜名","reason":"实质推荐理由，禁止笔记[1]提及类废话"}],"needReservation":"需要提前预约","pros":["..."],"cons":["..."],"practicalInfo":{"avgPrice":"...","waitTime":"...","paymentMethod":"...","tips":"..."},"adCount":0,"confidence":"high"}`;
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) return fallbackAnalyze(notes);
+    if (!apiKey) {
+      console.log("[Review] 无 DEEPSEEK_API_KEY，使用 fallback 分析");
+      return fallbackAnalyze(notes);
+    }
 
-    const response = await fetch(getDeepSeekUrl(), {
+    const deepseekUrl = getDeepSeekUrl();
+    console.log(`[Review] 调用 DeepSeek: ${deepseekUrl}`);
+
+    const response = await fetch(deepseekUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 1000 }),
     });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.log(`[Review] DeepSeek HTTP ${response.status}: ${errText.slice(0, 200)}`);
+      return fallbackAnalyze(notes);
+    }
+
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content?.trim() || "";
+    console.log(`[Review] DeepSeek 返回 ${text.length} 字符`);
+
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       const result = JSON.parse(match[0]);
       result.noteCount = notes.length;
       return result;
     }
+    console.log(`[Review] DeepSeek 返回格式异常: ${text.slice(0, 100)}`);
   } catch (e) { console.log(`[Review] DeepSeek 分析失败: ${e.message}`); }
   return fallbackAnalyze(notes);
 }
@@ -215,17 +231,19 @@ async function fetchXhsNotes(keywords, restaurantName, city) {
     return { notes: webNotes, fallback: false, message: null, source: "web_reviews" };
   }
 
-  // 3. 本地 Playwright 爬虫（需有效 XHS cookies）
-  try {
-    const { searchXhs } = require('../local-scraper');
-    console.log(`[Review] 尝试本地 Playwright 爬虫...`);
-    const notes = await searchXhs(keywords, 15);
-    if (notes.length > 0) {
-      console.log(`[Review] 本地爬虫返回 ${notes.length} 条真实笔记`);
-      return { notes, fallback: false, message: null, source: "xiaohongshu" };
+  // 3. 本地 Playwright 爬虫（仅本地开发环境，Vercel 跳过）
+  if (!process.env.VERCEL) {
+    try {
+      const { searchXhs } = require('../local-scraper');
+      console.log(`[Review] 尝试本地 Playwright 爬虫...`);
+      const notes = await searchXhs(keywords, 15);
+      if (notes.length > 0) {
+        console.log(`[Review] 本地爬虫返回 ${notes.length} 条真实笔记`);
+        return { notes, fallback: false, message: null, source: "xiaohongshu" };
+      }
+    } catch (err) {
+      console.log(`[Review] 本地爬虫不可用: ${err.message}`);
     }
-  } catch (err) {
-    console.log(`[Review] 本地爬虫不可用: ${err.message}`);
   }
 
   // 4. 最终降级到 demo 数据

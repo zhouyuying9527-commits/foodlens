@@ -25,10 +25,19 @@ module.exports = async (req, res) => {
     const dataParam = `!4m5!3m4!1s${id}!8m2!3d${lat || 48.8566}!4d${lng || 2.3522}`;
     const url = `https://serpapi.com/search.json?engine=google_maps&type=place&data=${encodeURIComponent(dataParam)}&api_key=${apiKey}`;
 
-    const response = await fetch(url);
+    console.log(`[PlaceDetail] 请求: id=${id}, lat=${lat}, lng=${lng}`);
+
+    const response = await fetch(url, { signal: AbortSignal.timeout(25000) });
+    if (!response.ok) {
+      console.log(`[PlaceDetail] SerpApi HTTP ${response.status}`);
+      return res.status(502).json({ error: `SerpApi HTTP ${response.status}` });
+    }
     const data = await response.json();
 
-    if (data.error) return res.status(502).json({ error: data.error });
+    if (data.error) {
+      console.log(`[PlaceDetail] SerpApi error: ${data.error}`);
+      return res.status(502).json({ error: data.error });
+    }
 
     const pr = data.place_results || {};
 
