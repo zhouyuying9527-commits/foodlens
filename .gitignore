@@ -6,3 +6,4 @@ scraper-service/node_modules/
 *.log
 .DS_Store
 debug-*.png
+package-lock.json
