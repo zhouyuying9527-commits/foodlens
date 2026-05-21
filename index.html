@@ -178,25 +178,92 @@
       .detail-panel { width: 320px; }
     }
 
-    /* 移动端：堆叠布局，杜绝横向溢出 */
+    /* ===== 移动端（≤768px）：面板 / 地图 切换式布局 ===== */
     @media (max-width: 768px) {
-      html, body { width: 100%; overflow-x: hidden; }
-      body { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
-      .panel { width: 100%; height: auto; max-height: none; box-shadow: 0 2px 8px rgba(0,0,0,0.06); position: static; }
-      .panel-header { padding: 16px 16px 12px; }
-      .filters { padding: 12px 16px; }
-      .results { max-height: none; overflow-y: visible; }
-      .map-container { width: 100%; height: 60vh; min-height: 320px; flex: none; position: relative; }
-      .detail-panel { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100vh; max-width: 100%; z-index: 2000; }
-      .detail-panel.active { display: block; }
-      /* 防止任意元素撑破视窗 */
-      .panel, .detail-panel, .results, .filters, .xhs-result, .xhs-block, .poi-photos {
-        max-width: 100%;
-        box-sizing: border-box;
+      html, body {
+        width: 100% !important;
+        max-width: 100vw !important;
+        overflow-x: hidden !important;
       }
-      img, video, iframe { max-width: 100%; height: auto; }
+      body {
+        flex-direction: column !important;
+        height: auto !important;
+        min-height: 100vh !important;
+        overflow: visible !important;
+        display: block !important;
+      }
+
+      /* 默认：只显示面板（占满屏幕），地图隐藏 */
+      .panel {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        position: static !important;
+        box-shadow: none !important;
+        flex: none !important;
+      }
+      .panel-header { padding: 14px 16px 10px !important; }
+      .filters { padding: 12px 16px !important; }
+      .results { max-height: none !important; overflow-y: visible !important; padding-bottom: 80px; }
+
+      /* 地图默认隐藏，点浮动按钮才打开（fullscreen overlay） */
+      .map-container {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 1500 !important;
+        display: none !important;
+      }
+      body.show-map .map-container { display: block !important; }
+      body.show-map .panel { display: none !important; }
+
+      /* 移动端浮动按钮 */
+      .mobile-toggle {
+        position: fixed !important;
+        right: 16px !important;
+        bottom: 20px !important;
+        z-index: 1600 !important;
+        background: #1a365d;
+        color: #fff;
+        border: none;
+        border-radius: 50px;
+        padding: 12px 18px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        box-shadow: 0 4px 14px rgba(26,54,93,0.35);
+        display: flex !important;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      /* 详情面板：手机上全屏覆盖 */
+      .detail-panel {
+        position: fixed !important;
+        top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100% !important;
+        z-index: 2000 !important;
+        overflow-y: auto !important;
+      }
+
+      /* 通用：防止任何子元素撑破视窗 */
+      .panel, .detail-panel, .results, .filters, .xhs-result, .xhs-block, .poi-photos {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      img, video, iframe { max-width: 100% !important; height: auto; }
       .index-grid { grid-template-columns: 1fr !important; }
-      .restaurant-card { min-width: 0; }
+      .restaurant-card { min-width: 0 !important; }
+    }
+
+    /* 桌面端隐藏移动端浮动按钮 */
+    @media (min-width: 769px) {
+      .mobile-toggle { display: none !important; }
     }
   </style>
 </head>
@@ -283,6 +350,34 @@
     <div id="map"></div>
   </div>
 
+  <!-- 移动端浮动切换按钮 -->
+  <button class="mobile-toggle" id="mobileToggle" onclick="toggleMobileView()" style="display:none;">
+    <span id="mobileToggleIcon">🗺️</span>
+    <span id="mobileToggleLabel">看地图</span>
+  </button>
+
+  <script>
+    function toggleMobileView() {
+      const showingMap = document.body.classList.toggle('show-map');
+      document.getElementById('mobileToggleIcon').textContent = showingMap ? '📋' : '🗺️';
+      document.getElementById('mobileToggleLabel').textContent = showingMap ? '看列表' : '看地图';
+      // 切到地图时强制 Leaflet 重排，避免灰屏
+      if (showingMap && window.map) {
+        setTimeout(() => window.map.invalidateSize(), 100);
+      }
+      window.scrollTo(0, 0);
+    }
+    // 仅移动端显示
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      document.getElementById('mobileToggle').style.display = 'flex';
+    }
+    window.addEventListener('resize', () => {
+      const isMobile = window.matchMedia('(max-width: 768px)').matches;
+      document.getElementById('mobileToggle').style.display = isMobile ? 'flex' : 'none';
+      if (!isMobile) document.body.classList.remove('show-map');
+    });
+  </script>
+
   <script>
     // ── State ──
     let map, userLat, userLng;
@@ -320,6 +415,7 @@
       userLng = 2.3522;
 
       map = L.map("map").setView([userLat, userLng], 14);
+      window.map = map; // 供移动端 toggle 使用
 
       // 地图瓦片：固定使用 OSM 德国镜像（国内可访问，样式统一）
       L.tileLayer("https://tile.openstreetmap.de/{z}/{x}/{y}.png", {
