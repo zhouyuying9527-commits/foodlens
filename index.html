@@ -164,6 +164,32 @@
     .location-banner { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: #fff; padding: 10px 20px; border-radius: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12); font-size: 0.85rem; color: #64748b; z-index: 800; display: none; }
     .location-banner.active { display: block; }
 
+    /* 列表页面横幅（淡入淡出） */
+    .panel-banner {
+      margin: 12px 24px 0;
+      padding: 10px 14px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      color: #9a3412;
+      line-height: 1.5;
+      opacity: 0;
+      max-height: 0;
+      overflow: hidden;
+      transition: opacity .35s ease, max-height .35s ease, margin .35s ease, padding .35s ease;
+      padding-top: 0; padding-bottom: 0; margin-top: 0;
+      border-color: transparent; background: transparent;
+    }
+    .panel-banner.show {
+      opacity: 1;
+      max-height: 120px;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #fff7ed;
+      border-color: #fed7aa;
+    }
+
     /* Marker styles */
     .custom-marker { background: #1a365d; color: #fff; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
     .custom-marker.highlight { background: #3b82f6; transform: scale(1.2); }
@@ -224,7 +250,7 @@
       .mobile-toggle {
         position: fixed !important;
         right: 16px !important;
-        bottom: 20px !important;
+        bottom: 40px !important;
         z-index: 1600 !important;
         background: #1a365d;
         color: #fff;
@@ -256,7 +282,7 @@
         display: flex !important;
         position: fixed !important;
         right: 16px !important;
-        bottom: 20px !important;
+        bottom: 40px !important;
         z-index: 2100 !important;
       }
 
@@ -282,6 +308,11 @@
     <div class="panel-header">
       <h1>食探 FoodLens</h1>
       <p>发现附近好评餐厅 · 全网中文口碑一键查看</p>
+    </div>
+
+    <!-- 列表页提示横幅（淡入淡出） -->
+    <div id="panelBanner" class="panel-banner">
+      <span id="panelBannerText"></span>
     </div>
 
     <div class="filters">
@@ -369,7 +400,7 @@
   </button>
 
   <!-- 移动端：地图选点后弹出的搜索按钮（与「看列表」按钮平行） -->
-  <button id="mapSearchHere" onclick="doMapSearchHere()" style="display:none;position:fixed;left:16px;bottom:20px;z-index:1700;background:#3b82f6;color:#fff;border:none;border-radius:50px;padding:12px 18px;font-size:0.88rem;font-weight:600;box-shadow:0 4px 14px rgba(59,130,246,0.45);cursor:pointer;white-space:nowrap;align-items:center;gap:6px;">
+  <button id="mapSearchHere" onclick="doMapSearchHere()" style="display:none;position:fixed;left:16px;bottom:40px;z-index:1700;background:#3b82f6;color:#fff;border:none;border-radius:50px;padding:12px 18px;font-size:0.88rem;font-weight:600;box-shadow:0 4px 14px rgba(59,130,246,0.45);cursor:pointer;white-space:nowrap;align-items:center;gap:6px;">
     🔍 搜索附近餐厅
   </button>
 
@@ -384,6 +415,19 @@
         setTimeout(() => window.map.invalidateSize(), 100);
       }
       window.scrollTo(0, 0);
+    }
+
+    // 列表页提示横幅（淡入淡出）
+    let _panelBannerTimer = null;
+    function showPanelBanner(text, duration = 5000) {
+      const el = document.getElementById('panelBanner');
+      if (!el) return;
+      document.getElementById('panelBannerText').textContent = text;
+      el.classList.add('show');
+      clearTimeout(_panelBannerTimer);
+      if (duration > 0) {
+        _panelBannerTimer = setTimeout(() => el.classList.remove('show'), duration);
+      }
     }
 
     // 地图选点后弹出搜索按钮（仅在地图视图下显示）
@@ -480,9 +524,7 @@
             if (lat >= 18 && lat <= 54 && lng >= 73 && lng <= 135) {
               // 用户在中国，不使用本地定位（中国的 GPS 坐标无法在海外地图搜索餐厅）
               console.log("检测到用户在中国，使用默认海外城市");
-              document.getElementById("locationBanner").textContent = "你当前在国内，已为你选择巴黎作为默认城市，可切换其他目的地";
-              document.getElementById("locationBanner").style.display = "block";
-              setTimeout(() => { document.getElementById("locationBanner").style.display = "none"; }, 5000);
+              showPanelBanner("你当前在国内，已为你选择巴黎作为默认城市，可切换其他目的地", 6000);
             } else {
               updateUserLocation(lat, lng, "GPS定位");
               document.getElementById("cityInput").value = `📍 当前位置`;
