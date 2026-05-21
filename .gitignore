@@ -7,3 +7,4 @@ scraper-service/node_modules/
 .DS_Store
 debug-*.png
 package-lock.json
+.vercel
