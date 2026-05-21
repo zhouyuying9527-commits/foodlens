@@ -666,7 +666,7 @@
 
       // 初始显示基本信息（从列表数据）
       document.getElementById("poiPhotos").innerHTML = r.photos && r.photos.length
-        ? r.photos.map((p) => `<img src="${proxyImg(p)}" alt="${r.name}" onerror="this.style.display='none'">`).join("")
+        ? r.photos.map((p) => `<img src="${proxyImg(p)}" data-orig="${p}" alt="${r.name}" loading="lazy" referrerpolicy="no-referrer" onerror="imgFallback(this, this.dataset.orig)">`).join("")
         : `<div class="no-photo">暂无图片</div>`;
 
       document.getElementById("poiInfo").innerHTML = `
@@ -778,16 +778,29 @@
       if (!url) return '';
       // 所有 Google CDN 域名都走代理（含 ggpht/gstatic 等子域）
       if (/(googleusercontent|googleapis|ggpht|gstatic|google\.com)/.test(url)) {
-        return '/api/image-proxy?url=' + encodeURIComponent(url);
+        // 优先用 wsrv.nl 公共图片代理（专门做这事，比自建 Vercel 代理稳定）
+        // wsrv.nl 要求 url 不带 https:// 前缀
+        const stripped = url.replace(/^https?:\/\//, '');
+        return 'https://wsrv.nl/?url=' + encodeURIComponent(stripped) + '&default=fallback';
       }
       return url;
+    }
+
+    // 图片加载失败时回退到自建 Vercel 代理
+    function imgFallback(imgEl, originalUrl) {
+      if (imgEl.dataset.fallbackTried) {
+        imgEl.style.display = 'none';
+        return;
+      }
+      imgEl.dataset.fallbackTried = '1';
+      imgEl.src = '/api/image-proxy?url=' + encodeURIComponent(originalUrl);
     }
 
     function renderPoiHeader(poi, r) {
       // 图片（通过代理加载 Google 图片）
       if (poi.photos && poi.photos.length > 0) {
         document.getElementById("poiPhotos").innerHTML = poi.photos.map((p) =>
-          `<img src="${proxyImg(p)}" alt="${poi.name}" onerror="this.style.display='none'">`
+          `<img src="${proxyImg(p)}" data-orig="${p}" alt="${poi.name}" loading="lazy" referrerpolicy="no-referrer" onerror="imgFallback(this, this.dataset.orig)">`
         ).join("") + `<div class="no-photo" style="display:none;">暂无图片</div>`;
         setTimeout(() => {
           const container = document.getElementById("poiPhotos");
