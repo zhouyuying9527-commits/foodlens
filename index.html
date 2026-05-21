@@ -368,9 +368,9 @@
     <span id="mobileToggleLabel">看地图</span>
   </button>
 
-  <!-- 移动端：地图选点后弹出的搜索按钮 -->
-  <button id="mapSearchHere" onclick="doMapSearchHere()" style="display:none;position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:1700;background:#3b82f6;color:#fff;border:none;border-radius:50px;padding:14px 24px;font-size:0.92rem;font-weight:600;box-shadow:0 6px 20px rgba(59,130,246,0.45);cursor:pointer;white-space:nowrap;">
-    🔍 搜索此处餐厅
+  <!-- 移动端：地图选点后弹出的搜索按钮（与「看列表」按钮平行） -->
+  <button id="mapSearchHere" onclick="doMapSearchHere()" style="display:none;position:fixed;left:16px;bottom:20px;z-index:1700;background:#3b82f6;color:#fff;border:none;border-radius:50px;padding:12px 18px;font-size:0.88rem;font-weight:600;box-shadow:0 4px 14px rgba(59,130,246,0.45);cursor:pointer;white-space:nowrap;align-items:center;gap:6px;">
+    🔍 搜索附近餐厅
   </button>
 
   <script>
@@ -391,7 +391,7 @@
       const isMobile = window.matchMedia('(max-width: 768px)').matches;
       if (!isMobile) return;
       if (!document.body.classList.contains('show-map')) return;
-      document.getElementById('mapSearchHere').style.display = 'block';
+      document.getElementById('mapSearchHere').style.display = 'inline-flex';
     }
 
     // 点击「搜索此处餐厅」：切回列表 + 触发搜索
