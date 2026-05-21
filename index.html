@@ -250,6 +250,15 @@
         z-index: 2000 !important;
         overflow-y: auto !important;
       }
+      /* 手机端：隐藏 X 按钮，改用底部「看列表」按钮 */
+      .detail-close { display: none !important; }
+      .detail-back-mobile {
+        display: flex !important;
+        position: fixed !important;
+        right: 16px !important;
+        bottom: 20px !important;
+        z-index: 2100 !important;
+      }
 
       /* 通用：防止任何子元素撑破视窗 */
       .panel, .detail-panel, .results, .filters, .xhs-result, .xhs-block, .poi-photos {
@@ -263,7 +272,7 @@
 
     /* 桌面端隐藏移动端浮动按钮 */
     @media (min-width: 769px) {
-      .mobile-toggle { display: none !important; }
+      .mobile-toggle, .detail-back-mobile { display: none !important; }
     }
   </style>
 </head>
@@ -331,6 +340,9 @@
   <!-- 右侧详情面板（POI 改造版）-->
   <div class="detail-panel" id="detailPanel">
     <button class="detail-close" onclick="closeDetail()">&times;</button>
+    <button class="mobile-toggle detail-back-mobile" onclick="closeDetail()" style="display:none;">
+      <span>📋</span><span>看列表</span>
+    </button>
     <div class="poi-header">
       <div class="poi-photos" id="poiPhotos"><div class="no-photo">加载中...</div></div>
       <div class="poi-info" id="poiInfo"></div>
@@ -356,17 +368,44 @@
     <span id="mobileToggleLabel">看地图</span>
   </button>
 
+  <!-- 移动端：地图选点后弹出的搜索按钮 -->
+  <button id="mapSearchHere" onclick="doMapSearchHere()" style="display:none;position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:1700;background:#3b82f6;color:#fff;border:none;border-radius:50px;padding:14px 24px;font-size:0.92rem;font-weight:600;box-shadow:0 6px 20px rgba(59,130,246,0.45);cursor:pointer;white-space:nowrap;">
+    🔍 搜索此处餐厅
+  </button>
+
   <script>
     function toggleMobileView() {
       const showingMap = document.body.classList.toggle('show-map');
       document.getElementById('mobileToggleIcon').textContent = showingMap ? '📋' : '🗺️';
       document.getElementById('mobileToggleLabel').textContent = showingMap ? '看列表' : '看地图';
-      // 切到地图时强制 Leaflet 重排，避免灰屏
+      // 切到列表时隐藏地图上的搜索按钮
+      if (!showingMap) document.getElementById('mapSearchHere').style.display = 'none';
       if (showingMap && window.map) {
         setTimeout(() => window.map.invalidateSize(), 100);
       }
       window.scrollTo(0, 0);
     }
+
+    // 地图选点后弹出搜索按钮（仅在地图视图下显示）
+    function showMapSearchPrompt() {
+      const isMobile = window.matchMedia('(max-width: 768px)').matches;
+      if (!isMobile) return;
+      if (!document.body.classList.contains('show-map')) return;
+      document.getElementById('mapSearchHere').style.display = 'block';
+    }
+
+    // 点击「搜索此处餐厅」：切回列表 + 触发搜索
+    function doMapSearchHere() {
+      document.getElementById('mapSearchHere').style.display = 'none';
+      // 切回列表视图
+      document.body.classList.remove('show-map');
+      document.getElementById('mobileToggleIcon').textContent = '🗺️';
+      document.getElementById('mobileToggleLabel').textContent = '看地图';
+      window.scrollTo(0, 0);
+      // 触发搜索
+      if (typeof searchNearby === 'function') searchNearby();
+    }
+
     // 仅移动端显示
     if (window.matchMedia('(max-width: 768px)').matches) {
       document.getElementById('mobileToggle').style.display = 'flex';
@@ -374,7 +413,10 @@
     window.addEventListener('resize', () => {
       const isMobile = window.matchMedia('(max-width: 768px)').matches;
       document.getElementById('mobileToggle').style.display = isMobile ? 'flex' : 'none';
-      if (!isMobile) document.body.classList.remove('show-map');
+      if (!isMobile) {
+        document.body.classList.remove('show-map');
+        document.getElementById('mapSearchHere').style.display = 'none';
+      }
     });
   </script>
 
@@ -604,6 +646,8 @@
         updateUserLocation(e.latlng.lat, e.latlng.lng, "地图选点");
         cityInput.value = `📍 ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
         reverseGeocodeCity(e.latlng.lat, e.latlng.lng);
+        // 移动端：地图选点后弹出"搜索此处餐厅"按钮
+        showMapSearchPrompt();
       });
 
       // 反向地理编码：根据坐标推断城市名，更新 window.currentCityName
