@@ -776,7 +776,8 @@
 
     function proxyImg(url) {
       if (!url) return '';
-      if (url.includes('googleusercontent.com') || url.includes('googleapis.com')) {
+      // 所有 Google CDN 域名都走代理（含 ggpht/gstatic 等子域）
+      if (/(googleusercontent|googleapis|ggpht|gstatic|google\.com)/.test(url)) {
         return '/api/image-proxy?url=' + encodeURIComponent(url);
       }
       return url;

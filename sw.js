@@ -1,4 +1,4 @@
-const CACHE_NAME = 'foodlens-assets-v1';
+const CACHE_NAME = 'foodlens-assets-v2';
 const TILE_HOSTS = ['basemaps.cartocdn.com', 'tile.openstreetmap.fr', 'tile.openstreetmap.de', 'tile.openstreetmap.org'];
 
 self.addEventListener('install', () => self.skipWaiting());
