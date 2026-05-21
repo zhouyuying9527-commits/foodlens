@@ -8,7 +8,7 @@
   <script src="/lib/leaflet.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; height: 100vh; display: flex; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; height: 100vh; display: flex; overflow: hidden; text-align: justify; }
 
     /* 左侧面板 */
     .panel { width: 420px; height: 100vh; background: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 12px rgba(0,0,0,0.08); z-index: 1000; position: relative; }
@@ -108,6 +108,13 @@
     .xhs-block { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid #f0f0f0; }
     .xhs-block-title { font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 10px; letter-spacing: 0.5px; }
 
+    /* 统一信息列表样式 */
+    .info-list { display: flex; flex-direction: column; gap: 6px; }
+    .info-list-item { font-size: 0.84rem; color: #334155; line-height: 1.5; padding: 4px 0; }
+    .info-list-label { font-weight: 500; color: #475569; margin-right: 6px; }
+    .info-list-label::after { content: ""; }
+    .info-list-value { color: #64748b; }
+
     /* 中国胃指数 */
     .stomach-stars { font-size: 1rem; letter-spacing: 2px; margin-bottom: 4px; }
     .stomach-reason { font-size: 0.78rem; color: #78350f; line-height: 1.4; }
@@ -176,22 +183,18 @@
   <div class="panel">
     <div class="panel-header">
       <h1>食探 FoodLens</h1>
-      <p>发现附近好评餐厅 · 小红书口碑一键查看</p>
+      <p>发现附近好评餐厅 · 全网中文口碑一键查看</p>
     </div>
 
     <div class="filters">
       <div class="filter-row">
         <div class="filter-item" style="flex:2;">
-          <label>位置</label>
-          <select id="filterLocation">
-            <option value="auto">点击地图选点 / 自动定位</option>
-            <option value="48.8566,2.3522" selected>巴黎 Paris</option>
-            <option value="35.6762,139.6503">东京 Tokyo</option>
-            <option value="13.7563,100.5018">曼谷 Bangkok</option>
-            <option value="40.7128,-74.0060">纽约 New York</option>
-            <option value="51.5074,-0.1278">伦敦 London</option>
-            <option value="37.5665,126.9780">首尔 Seoul</option>
-          </select>
+          <label>目的地</label>
+          <div class="city-input-wrapper" style="position:relative;">
+            <input type="text" id="cityInput" placeholder="输入城市名，如：巴黎、大阪、罗马..." value="巴黎 Paris" autocomplete="off"
+              style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:0.85rem;outline:none;" />
+            <div id="citySuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:9999;max-height:220px;overflow-y:auto;"></div>
+          </div>
         </div>
         <div class="filter-item">
           <label>搜索半径</label>
@@ -246,7 +249,7 @@
     <div class="poi-status" id="poiStatus"></div>
     <div class="poi-meta" id="poiMeta"></div>
     <div class="section-tab" id="sectionTab">
-      <div class="section-tab-item xhs active" data-tab="xhs" onclick="switchTab('xhs')">小红书口碑</div>
+      <div class="section-tab-item xhs active" data-tab="xhs" onclick="switchTab('xhs')">全网口碑</div>
       <div class="section-tab-item" data-tab="google" onclick="switchTab('google')">Google 评论</div>
     </div>
     <div id="tabContent"></div>
@@ -296,11 +299,10 @@
 
       map = L.map("map").setView([userLat, userLng], 14);
 
-      // 使用 CartoDB 瓦片（需要 VPN）
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 20,
+      // 地图瓦片：固定使用 OSM 德国镜像（国内可访问，样式统一）
+      L.tileLayer("https://tile.openstreetmap.de/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
       }).addTo(map);
 
       // 初始位置标记
@@ -308,12 +310,24 @@
         radius: 8, fillColor: "#3b82f6", color: "#fff", weight: 2, fillOpacity: 1,
       }).addTo(map).bindPopup("当前位置（默认巴黎市中心）");
 
-      // 尝试自动定位（国外可用）
+      // 尝试自动定位
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            updateUserLocation(pos.coords.latitude, pos.coords.longitude, "GPS定位");
-            document.getElementById("filterLocation").value = "auto";
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            // 检测用户是否在中国境内（粗略判断：纬度18-54，经度73-135）
+            if (lat >= 18 && lat <= 54 && lng >= 73 && lng <= 135) {
+              // 用户在中国，不使用本地定位（中国的 GPS 坐标无法在海外地图搜索餐厅）
+              console.log("检测到用户在中国，使用默认海外城市");
+              document.getElementById("locationBanner").textContent = "你当前在国内，已为你选择巴黎作为默认城市，可切换其他目的地";
+              document.getElementById("locationBanner").style.display = "block";
+              setTimeout(() => { document.getElementById("locationBanner").style.display = "none"; }, 5000);
+            } else {
+              updateUserLocation(lat, lng, "GPS定位");
+              document.getElementById("cityInput").value = `📍 当前位置`;
+              reverseGeocodeCity(lat, lng);
+            }
           },
           () => {
             console.log("自动定位失败，使用默认城市");
@@ -322,25 +336,184 @@
         );
       }
 
-      // 监听城市切换
-      document.getElementById("filterLocation").addEventListener("change", (e) => {
-        if (e.target.value !== "auto") {
-          const [lat, lng] = e.target.value.split(",").map(Number);
-          updateUserLocation(lat, lng, "城市选择");
+      // 城市输入 + 自动补全
+      const presetCities = [
+        { name: "巴黎 Paris", lat: 48.8566, lng: 2.3522 },
+        { name: "东京 Tokyo", lat: 35.6762, lng: 139.6503 },
+        { name: "曼谷 Bangkok", lat: 13.7563, lng: 100.5018 },
+        { name: "纽约 New York", lat: 40.7128, lng: -74.0060 },
+        { name: "伦敦 London", lat: 51.5074, lng: -0.1278 },
+        { name: "首尔 Seoul", lat: 37.5665, lng: 126.9780 },
+        { name: "大阪 Osaka", lat: 34.6937, lng: 135.5023 },
+        { name: "罗马 Rome", lat: 41.9028, lng: 12.4964 },
+        { name: "巴塞罗那 Barcelona", lat: 41.3874, lng: 2.1686 },
+        { name: "新加坡 Singapore", lat: 1.3521, lng: 103.8198 },
+        { name: "悉尼 Sydney", lat: -33.8688, lng: 151.2093 },
+        { name: "清迈 Chiang Mai", lat: 18.7883, lng: 98.9853 },
+        { name: "米兰 Milan", lat: 45.4642, lng: 9.1900 },
+        { name: "京都 Kyoto", lat: 35.0116, lng: 135.7681 },
+        { name: "旧金山 San Francisco", lat: 37.7749, lng: -122.4194 },
+        { name: "伊斯坦布尔 Istanbul", lat: 41.0082, lng: 28.9784 },
+      ];
+
+      const cityInput = document.getElementById("cityInput");
+      const citySuggestions = document.getElementById("citySuggestions");
+      let geocodeTimer = null;
+
+      // 初始化 currentCityName（从输入框默认值取，不会被坐标污染）
+      if (!window.currentCityName) {
+        const initVal = cityInput.value.trim();
+        window.currentCityName = (initVal && !initVal.startsWith("📍"))
+          ? initVal.split(/\s+/)[0]
+          : "巴黎";
+      }
+
+      cityInput.addEventListener("focus", () => showSuggestions(""));
+      cityInput.addEventListener("input", (e) => {
+        const val = e.target.value.trim();
+        // 用户主动输入文字时，立即更新城市名（排除坐标显示）
+        if (val && !val.startsWith("📍")) {
+          window.currentCityName = val.split(/\s+/)[0];
+        }
+        showSuggestions(val);
+        // 如果输入的不是预设城市，延迟做地理编码
+        clearTimeout(geocodeTimer);
+        if (val.length >= 2 && !presetCities.some(c => c.name === val)) {
+          geocodeTimer = setTimeout(() => geocodeCity(val), 600);
         }
       });
+      // 回车直接搜索
+      cityInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          clearTimeout(geocodeTimer);
+          const val = cityInput.value.trim();
+          if (val.length >= 2) {
+            citySuggestions.style.display = "none";
+            geocodeCity(val);
+          }
+        }
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".city-input-wrapper")) citySuggestions.style.display = "none";
+      });
+
+      function showSuggestions(query) {
+        const q = query.toLowerCase();
+        const matched = q ? presetCities.filter(c => c.name.toLowerCase().includes(q)) : presetCities;
+        if (matched.length === 0 && q.length < 2) { citySuggestions.style.display = "none"; return; }
+
+        let html = matched.map(c =>
+          `<div class="city-option" style="padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f5f5f5;" data-lat="${c.lat}" data-lng="${c.lng}" data-name="${c.name}">${c.name}</div>`
+        ).join("");
+
+        if (q.length >= 2 && !matched.some(c => c.name.toLowerCase() === q)) {
+          html += `<div class="city-option city-search" style="padding:8px 12px;cursor:pointer;font-size:0.82rem;color:#3b82f6;border-top:1px solid #e2e8f0;" data-search="${query}">🔍 搜索「${query}」</div>`;
+        }
+
+        citySuggestions.innerHTML = html;
+        citySuggestions.style.display = "block";
+
+        citySuggestions.querySelectorAll(".city-option").forEach(opt => {
+          opt.addEventListener("mouseenter", () => opt.style.background = "#f8fafc");
+          opt.addEventListener("mouseleave", () => opt.style.background = "");
+          opt.addEventListener("click", () => {
+            if (opt.dataset.search) {
+              geocodeCity(opt.dataset.search);
+            } else {
+              cityInput.value = opt.dataset.name;
+              window.currentCityName = opt.dataset.name;
+              updateUserLocation(Number(opt.dataset.lat), Number(opt.dataset.lng), "城市选择");
+            }
+            citySuggestions.style.display = "none";
+          });
+        });
+      }
+
+      async function geocodeCity(query) {
+        try {
+          cityInput.style.borderColor = "#3b82f6";
+          citySuggestions.innerHTML = '<div style="padding:10px 12px;font-size:0.82rem;color:#94a3b8;">🔍 正在搜索「' + query + '」...</div>';
+          citySuggestions.style.display = "block";
+
+          const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(12000) });
+          const data = await res.json();
+          cityInput.style.borderColor = "#e2e8f0";
+
+          if (data.results && data.results.length > 0) {
+            // 如果只有一个结果，直接跳转
+            if (data.results.length === 1) {
+              const r = data.results[0];
+              cityInput.value = r.name;
+              window.currentCityName = query; // 用用户输入的查询词作为 city，如「巴厘岛」
+              updateUserLocation(r.lat, r.lng, "搜索定位");
+              citySuggestions.style.display = "none";
+              return;
+            }
+            // 多个结果让用户选
+            let html = data.results.map(r =>
+              `<div class="city-option" style="padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f5f5f5;" data-lat="${r.lat}" data-lng="${r.lng}" data-name="${r.name}">
+                <div>${r.name}</div>
+                ${r.address ? `<div style="font-size:0.72rem;color:#94a3b8;">${r.address}</div>` : ""}
+              </div>`
+            ).join("");
+            citySuggestions.innerHTML = html;
+            citySuggestions.style.display = "block";
+
+            citySuggestions.querySelectorAll(".city-option").forEach(opt => {
+              opt.addEventListener("mouseenter", () => opt.style.background = "#f8fafc");
+              opt.addEventListener("mouseleave", () => opt.style.background = "");
+              opt.addEventListener("click", () => {
+                cityInput.value = opt.dataset.name;
+                window.currentCityName = query; // 保留用户输入的查询词
+                updateUserLocation(Number(opt.dataset.lat), Number(opt.dataset.lng), "搜索定位");
+                citySuggestions.style.display = "none";
+              });
+            });
+          } else {
+            citySuggestions.innerHTML = '<div style="padding:10px 12px;font-size:0.82rem;color:#94a3b8;">未找到「' + query + '」，请换个关键词试试</div>';
+          }
+        } catch (e) {
+          cityInput.style.borderColor = "#e2e8f0";
+          citySuggestions.innerHTML = '<div style="padding:10px 12px;font-size:0.82rem;color:#ef4444;">搜索失败，请检查网络</div>';
+          console.log("地理编码失败:", e.message);
+        }
+      }
 
       // 点击地图选点
       map.on("click", (e) => {
         updateUserLocation(e.latlng.lat, e.latlng.lng, "地图选点");
-        // 切换下拉框到"自定义"
-        document.getElementById("filterLocation").value = "auto";
+        cityInput.value = `📍 ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+        reverseGeocodeCity(e.latlng.lat, e.latlng.lng);
       });
+
+      // 反向地理编码：根据坐标推断城市名，更新 window.currentCityName
+      async function reverseGeocodeCity(lat, lng) {
+        try {
+          const r = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`, { signal: AbortSignal.timeout(12000) });
+          if (!r.ok) return;
+          const d = await r.json();
+          if (d.city) {
+            window.currentCityName = d.city;
+            console.log("[reverseGeocode] currentCityName =", d.city, "country=", d.country);
+            // 在输入框旁显示推断结果
+            const banner = document.getElementById("locationBanner");
+            if (banner) {
+              banner.textContent = `已识别为：${d.city}${d.country ? "，" + d.country : ""}`;
+              banner.style.display = "block";
+              setTimeout(() => { banner.style.display = "none"; }, 3500);
+            }
+          }
+        } catch (e) {
+          console.log("[reverseGeocode] failed:", e.message);
+        }
+      }
 
       document.getElementById("results").innerHTML = `
         <div class="empty-state">
           <div class="icon">🍜</div>
-          <p>选择城市或点击地图选择精确位置<br>设置筛选条件后点击「搜索附近餐厅」</p>
+          <p>输入目的地城市或点击地图选择位置<br>设置筛选条件后点击「搜索附近餐厅」</p>
         </div>`;
     }
 
@@ -447,6 +620,8 @@
     let currentPoiData = null;
     let currentXhsData = null;
     let requestId = 0;
+    const reviewCache = {};  // 前端缓存：{ restaurantName: { poi, xhs } }
+    const poiCache = {};
 
     async function selectRestaurant(index) {
       const r = restaurants[index];
@@ -469,8 +644,8 @@
 
       // 初始显示基本信息（从列表数据）
       document.getElementById("poiPhotos").innerHTML = r.photos && r.photos.length
-        ? r.photos.map((p) => `<img src="${p}" alt="${r.name}">`).join("")
-        : `<div class="no-photo">加载图片中...</div>`;
+        ? r.photos.map((p) => `<img src="${proxyImg(p)}" alt="${r.name}" onerror="this.style.display='none'">`).join("")
+        : `<div class="no-photo">暂无图片</div>`;
 
       document.getElementById("poiInfo").innerHTML = `
         <div class="poi-name">${r.name}</div>
@@ -490,40 +665,61 @@
           <p style="color:#64748b;font-size:0.85rem">正在获取详细信息...</p>
         </div>`;
 
-      // 并行请求 POI 详情 和 小红书评价
+      // 并行请求 POI 详情 和 评价（优先用缓存）
       currentPoiData = null;
       currentXhsData = null;
 
-      // 默认 tab（必须在重置后调用，否则会显示旧数据）
+      const cacheKey = r.name;
+
+      // 如果有缓存，直接用
+      if (reviewCache[cacheKey]) {
+        currentXhsData = reviewCache[cacheKey];
+      }
+      if (poiCache[cacheKey]) {
+        currentPoiData = poiCache[cacheKey];
+      }
+
+      // 默认 tab
       switchTab("xhs");
 
       requestId++;
       const thisId = requestId;
 
-      const poiPromise = fetchPoiDetail(r);
-      const xhsPromise = fetchXhsReview(r.name, index);
-
-      // POI 详情回来后更新面板上半部分
-      poiPromise.then((poi) => {
-        if (thisId !== requestId) return;
-        currentPoiData = poi;
-        if (poi) renderPoiHeader(poi, r);
-      });
-
-      // 小红书评价回来后更新下半部分
-      xhsPromise.then((xhs) => {
-        if (thisId !== requestId) return;
-        currentXhsData = xhs;
-        if (xhs) {
-          renderTabContent("xhs");
-          const cardXhs = document.getElementById(`xhs-${index}`);
-          if (cardXhs) {
-            const rating = xhs.rating || "unknown";
-            cardXhs.className = `card-xhs loaded ${rating}`;
-            cardXhs.textContent = `小红书: ${getRatingLabel(rating)} · ${xhs.noteCount || 0}条笔记`;
+      // 如果有 POI 缓存直接渲染，否则请求
+      if (currentPoiData) {
+        renderPoiHeader(currentPoiData, r);
+      } else {
+        const poiPromise = fetchPoiDetail(r);
+        poiPromise.then((poi) => {
+          if (thisId !== requestId) return;
+          currentPoiData = poi;
+          if (poi) {
+            poiCache[cacheKey] = poi;
+            renderPoiHeader(poi, r);
           }
-        }
-      });
+        });
+      }
+
+      // 如果有评价缓存直接渲染，否则请求
+      if (currentXhsData) {
+        renderTabContent("xhs");
+      } else {
+        const xhsPromise = fetchXhsReview(r.name, index);
+        xhsPromise.then((xhs) => {
+          if (thisId !== requestId) return;
+          currentXhsData = xhs;
+          if (xhs) {
+            reviewCache[cacheKey] = xhs;
+            renderTabContent("xhs");
+            const cardXhs = document.getElementById(`xhs-${index}`);
+            if (cardXhs) {
+              const rating = xhs.rating || "unknown";
+              cardXhs.className = `card-xhs loaded ${rating}`;
+              cardXhs.textContent = `口碑: ${getRatingLabel(rating)} · ${xhs.noteCount || 0}条评价`;
+            }
+          }
+        });
+      }
     }
 
     async function fetchPoiDetail(restaurant) {
@@ -556,10 +752,29 @@
       }
     }
 
+    function proxyImg(url) {
+      if (!url) return '';
+      if (url.includes('googleusercontent.com') || url.includes('googleapis.com')) {
+        return '/api/image-proxy?url=' + encodeURIComponent(url);
+      }
+      return url;
+    }
+
     function renderPoiHeader(poi, r) {
-      // 图片
+      // 图片（通过代理加载 Google 图片）
       if (poi.photos && poi.photos.length > 0) {
-        document.getElementById("poiPhotos").innerHTML = poi.photos.map((p) => `<img src="${p}" alt="${poi.name}">`).join("");
+        document.getElementById("poiPhotos").innerHTML = poi.photos.map((p) =>
+          `<img src="${proxyImg(p)}" alt="${poi.name}" onerror="this.style.display='none'">`
+        ).join("") + `<div class="no-photo" style="display:none;">暂无图片</div>`;
+        setTimeout(() => {
+          const container = document.getElementById("poiPhotos");
+          const visibleImgs = container.querySelectorAll('img:not([style*="display: none"])');
+          if (visibleImgs.length === 0) {
+            container.innerHTML = '<div class="no-photo">暂无可用图片</div>';
+          }
+        }, 8000);
+      } else {
+        document.getElementById("poiPhotos").innerHTML = '<div class="no-photo">暂无图片</div>';
       }
 
       // 营业状态
@@ -602,7 +817,7 @@
 
       if (tab === "xhs") {
         if (!currentXhsData) {
-          container.innerHTML = `<div class="detail-loading"><div class="spinner"></div><p style="color:#64748b;font-size:0.85rem">正在搜索小红书评价...</p></div>`;
+          container.innerHTML = `<div class="detail-loading"><div class="spinner"></div><p style="color:#64748b;font-size:0.85rem">正在搜索全网中文评价...</p></div>`;
           return;
         }
         renderXhsResult(currentXhsData);
@@ -629,9 +844,6 @@
 
     // ── Render XHS Review Result ──
     function renderXhsResult(data) {
-      const rating = data.rating || "unknown";
-      const ratingLabel = data.ratingLabel || getRatingLabel(rating);
-
       // 构建实用信息（含预订）
       const practicalItems = [];
       if (data.needReservation && data.needReservation !== "未提及") {
@@ -661,51 +873,79 @@
             <div style="font-size:0.92rem;color:#64748b;line-height:1.6;margin-bottom:16px;">还没有人发现这家宝藏店铺，来做第一个吃🦀的人吧！</div>
             ${data.irrelevantNotes && data.irrelevantNotes.length ? `<div style="font-size:0.78rem;color:#94a3b8;margin-top:8px;">搜索到 ${data.noteCount} 条笔记，但均与该餐厅无关</div>` : ""}
           ` : `
-            <div class="xhs-badge ${rating}">${ratingLabel}</div>
-
-            <!-- 板块1: 中国胃指数 -->
-            ${data.chineseStomachIndex ? `
-            <div class="xhs-block" style="background:#fff7ed;border-color:#fed7aa;">
-              <div class="xhs-block-title" style="color:#9a3412;">中国胃指数</div>
-              <div class="stomach-stars">${"🌟".repeat(data.chineseStomachIndex.score || 0)}</div>
-              <div class="stomach-reason">${data.chineseStomachIndex.reason || ""}</div>
+            <!-- 食探小结 -->
+            ${data.summary ? `
+            <div class="xhs-block" style="background:#f0fdf4;border-color:#bbf7d0;">
+              <div class="xhs-block-title" style="color:#166534;">🔍 食探小结</div>
+              <div style="font-size:0.88rem;color:#1e293b;line-height:1.6;">${data.summary}</div>
             </div>` : ""}
 
-            <!-- 板块2: 推荐菜品 -->
+            <!-- 双指数并列 -->
+            ${data.chineseStomachIndex || data.localIndex ? `
+            <div class="index-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+              ${data.chineseStomachIndex ? `
+              <div class="xhs-block" style="background:#fff7ed;border-color:#fed7aa;margin-bottom:0;">
+                <div class="xhs-block-title" style="color:#9a3412;">🇨🇳 中国胃指数</div>
+                <div style="font-size:1.1rem;margin:4px 0;letter-spacing:2px;">${scoreToStars(data.chineseStomachIndex.score)}</div>
+                <div style="font-size:0.8rem;color:#78350f;line-height:1.5;margin-top:4px;">${data.chineseStomachIndex.reason || ""}</div>
+              </div>` : ""}
+              ${data.localIndex ? `
+              <div class="xhs-block" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:0;">
+                <div class="xhs-block-title" style="color:#1e40af;">📍 本地指数</div>
+                <div style="font-size:1.1rem;margin:4px 0;letter-spacing:2px;">${scoreToStars(data.localIndex.score)}</div>
+                <div style="font-size:0.8rem;color:#1e3a5f;line-height:1.5;margin-top:4px;">${data.localIndex.reason || ""}</div>
+              </div>` : ""}
+            </div>` : ""}
+
+            <!-- 推荐菜品 -->
             ${data.recommendedDishes && data.recommendedDishes.length ? `
             <div class="xhs-block">
-              <div class="xhs-block-title" style="color:#059669;">推荐菜品</div>
-              ${data.recommendedDishes.map((d) => `<div class="dish-item"><div class="dish-name">${d.name}</div>${d.reason ? `<div class="dish-reason">${d.reason}</div>` : ""}</div>`).join("")}
+              <div class="xhs-block-title">🍽️ 推荐菜品</div>
+              <div class="info-list">
+                ${data.recommendedDishes.map((d) => `<div class="info-list-item" style="border-bottom:1px dashed #e2e8f0;padding-bottom:8px;"><div style="font-weight:600;color:#1e293b;margin-bottom:2px;">${d.name}</div>${d.reason ? `<div style="font-size:0.8rem;color:#64748b;">${d.reason}</div>` : ""}</div>`).join("")}
+              </div>
             </div>` : ""}
 
-            <!-- 板块3: 好评/差评要点 -->
+            <!-- 好评/差评 -->
             ${(data.pros && data.pros.length) || (data.cons && data.cons.length) ? `
             <div class="xhs-block">
-              <div class="pros-cons-grid">
-                <div class="pros-cons-col">
-                  <h5 class="pro-title">好评要点</h5>
-                  <ul class="xhs-pros">${(data.pros || []).map((p) => `<li>${p}</li>`).join("") || "<li>暂无</li>"}</ul>
+              <div class="xhs-block-title">📋 用户评价摘要</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                  <div style="font-size:0.75rem;font-weight:600;color:#10b981;margin-bottom:6px;">👍 好评</div>
+                  <div class="info-list">${(data.pros || []).map((p) => `<div class="info-list-item" style="border-left:2px solid #10b981;padding-left:8px;">${p}</div>`).join("") || '<div class="info-list-item" style="color:#94a3b8;">暂无</div>'}</div>
                 </div>
-                <div class="pros-cons-col">
-                  <h5 class="con-title">差评/注意</h5>
-                  <ul class="xhs-cons">${(data.cons || []).map((c) => `<li>${c}</li>`).join("") || "<li>暂无</li>"}</ul>
+                <div>
+                  <div style="font-size:0.75rem;font-weight:600;color:#ef4444;margin-bottom:6px;">👎 差评</div>
+                  <div class="info-list">${(data.cons || []).map((c) => `<div class="info-list-item" style="border-left:2px solid #ef4444;padding-left:8px;">${c}</div>`).join("") || '<div class="info-list-item" style="color:#94a3b8;">暂无</div>'}</div>
                 </div>
               </div>
             </div>` : ""}
 
-            <!-- 板块4: 实用信息（含预订） -->
+            <!-- 注意事项 -->
+            ${data.tips && data.tips.length ? `
+            <div class="xhs-block">
+              <div class="xhs-block-title">⚠️ 注意事项</div>
+              <div class="info-list">
+                ${data.tips.map((t) => `<div class="info-list-item" style="border-bottom:1px dashed #e2e8f0;padding-bottom:6px;">${t}</div>`).join("")}
+              </div>
+            </div>` : ""}
+
+            <!-- 实用信息 -->
             ${practicalItems.length ? `
             <div class="xhs-block">
-              <div class="xhs-block-title">实用信息</div>
-              ${practicalItems.map((item) => `<div class="xhs-practical-item"><span class="label">${item.label}:</span> ${item.value}</div>`).join("")}
+              <div class="xhs-block-title">💡 实用信息</div>
+              <div class="info-list">
+                ${practicalItems.map((item) => `<div class="info-list-item" style="border-bottom:1px dashed #e2e8f0;padding-bottom:6px;"><span class="info-list-label">${item.label}</span><span class="info-list-value">${item.value}</span></div>`).join("")}
+              </div>
             </div>` : ""}
           `}
 
-          ${notesHtml ? `<div class="xhs-block" style="border-color:#f0f0f0;"><div class="xhs-block-title">相关笔记 (${data.relevantNoteCount || data.noteCount || 0}条相关)</div>${notesHtml}</div>` : ""}
+          ${notesHtml ? `<div class="xhs-block" style="border-color:#f0f0f0;"><div class="xhs-block-title">📄 相关评价 (${data.relevantNoteCount || data.noteCount || 0}条)</div>${notesHtml}</div>` : ""}
 
           <div class="xhs-meta">
             搜索关键词: ${(data.keywords || []).join(" / ")} | 耗时 ${((data.elapsedMs || 0) / 1000).toFixed(1)}s
-            ${data.dataSource === "demo" ? " | Demo数据" : data.dataSource === "web_reviews" ? " | 互联网中文评价" : " | 小红书实时数据"}
+            ${data.dataSource === "demo" ? " | Demo数据" : data.dataSource === "web_reviews" ? " | 全网中文评价" : " | 小红书实时数据"}
             ${data.irrelevantNotes && data.irrelevantNotes.length ? ` | 过滤${data.irrelevantNotes.length}条无关笔记` : ""}
           </div>
         </div>`;
@@ -727,14 +967,16 @@
     }
 
     function getCityFromLocation() {
-      if (!userLat) return "Paris";
-      if (userLat > 35 && userLat < 36 && userLng > 139 && userLng < 140) return "东京";
-      if (userLat > 13 && userLat < 14 && userLng > 100 && userLng < 101) return "曼谷";
-      if (userLat > 48 && userLat < 49 && userLng > 2 && userLng < 3) return "巴黎";
-      if (userLat > 40 && userLat < 41 && userLng > -75 && userLng < -73) return "纽约";
-      if (userLat > 51 && userLat < 52 && userLng > -1 && userLng < 0) return "伦敦";
-      if (userLat > 37 && userLat < 38 && userLng > 126 && userLng < 127) return "首尔";
-      return "Paris";
+      // 优先用 state 里维护的真实城市名（不会被坐标污染）
+      if (window.currentCityName && window.currentCityName.trim()) {
+        return window.currentCityName.trim().split(/\s+/)[0];
+      }
+      // 兜底：从输入框解析（排除以 📍 开头的坐标显示）
+      const input = document.getElementById("cityInput");
+      if (input && input.value.trim() && !input.value.startsWith("📍")) {
+        return input.value.trim().split(/\s+/)[0];
+      }
+      return "巴黎";
     }
 
     function getRatingLabel(r) {
@@ -743,8 +985,16 @@
     function getLabelCN(k) {
       return { avgPrice: "人均", waitTime: "排队", paymentMethod: "支付方式", chineseMenu: "中文菜单", tips: "贴士" }[k] || k;
     }
+    function scoreToStars(score) {
+      // 直接用 1-5 分映射为星星
+      const s = Math.max(1, Math.min(5, Math.round(score)));
+      return "⭐".repeat(s);
+    }
 
     // ── Boot ──
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
     initMap();
   </script>
 </body>

@@ -28,10 +28,10 @@ async function fetchWebReviews(name, city) {
   if (!apiKey) return null;
 
   try {
-    // 搜索策略：餐厅名 + 城市 + 美食相关中文关键词
+    // 搜索策略：餐厅名 + 城市（强制包含城市名）
     const queries = [
-      `"${name}" ${city} 餐厅 推荐`,
-      `${name} ${city} 好吃 美食 点评`,
+      `"${name}" "${city}" 餐厅`,
+      `"${name}" ${city} 好吃 推荐`,
     ];
 
     const allNotes = [];
@@ -57,6 +57,15 @@ async function fetchWebReviews(name, city) {
         const foodRelated = ['餐', '美食', '吃', '味', '推荐', '菜', '好吃', '点评', 'restaurant', 'food', '厅', '馆', '料理', '米其林'].some(w => text.includes(w));
         if (!foodRelated) continue;
 
+        // 相关性校验：结果必须包含餐厅名或城市名的关键部分
+        const nameKey = name.toLowerCase().split(/\s+/)[0]; // 取餐厅名第一个词
+        const cityKey = city.toLowerCase().replace(/\s.*/, ''); // 取城市名第一个词
+        const contentLower = text;
+        const hasName = contentLower.includes(nameKey);
+        const hasCity = contentLower.includes(cityKey);
+        // 至少要包含餐厅名，最好也包含城市
+        if (!hasName) continue;
+
         allNotes.push({
           title: r.title || '',
           desc: r.snippet || '',
@@ -64,6 +73,7 @@ async function fetchWebReviews(name, city) {
           author: extractSource(r.link),
           link: r.link || '',
           keyword: name,
+          lang: 'zh',
         });
       }
     }
@@ -83,6 +93,66 @@ async function fetchWebReviews(name, city) {
     console.log(`[Review] Google 搜索失败: ${err.message}`);
   }
   return null;
+}
+
+// SerpApi Google 搜索本地语言评价（用于本地指数）
+async function fetchLocalReviews(name, city) {
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) return [];
+
+  // 城市对应的本地语言和搜索关键词
+  const cityLangMap = {
+    'Paris': { hl: 'fr', keywords: 'avis restaurant' },
+    '巴黎': { hl: 'fr', keywords: 'avis restaurant' },
+    'Tokyo': { hl: 'ja', keywords: 'レストラン 口コミ' },
+    '东京': { hl: 'ja', keywords: 'レストラン 口コミ' },
+    'Bangkok': { hl: 'th', keywords: 'ร้านอาหาร รีวิว' },
+    '曼谷': { hl: 'th', keywords: 'ร้านอาหาร รีวิว' },
+    'London': { hl: 'en', keywords: 'restaurant review' },
+    '伦敦': { hl: 'en', keywords: 'restaurant review' },
+    'New York': { hl: 'en', keywords: 'restaurant review' },
+    '纽约': { hl: 'en', keywords: 'restaurant review' },
+    'Seoul': { hl: 'ko', keywords: '맛집 리뷰' },
+    '首尔': { hl: 'ko', keywords: '맛집 리뷰' },
+    'Rome': { hl: 'it', keywords: 'ristorante recensioni' },
+    '罗马': { hl: 'it', keywords: 'ristorante recensioni' },
+    'Barcelona': { hl: 'es', keywords: 'restaurante opiniones' },
+    '巴塞罗那': { hl: 'es', keywords: 'restaurante opiniones' },
+  };
+
+  const langConfig = cityLangMap[city] || { hl: 'en', keywords: 'restaurant review' };
+
+  try {
+    const q = `"${name}" ${city} ${langConfig.keywords}`;
+    const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(q)}&hl=${langConfig.hl}&num=8&api_key=${apiKey}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return [];
+    const data = await response.json();
+
+    const results = data.organic_results || [];
+    const localNotes = [];
+    const nameKey = name.toLowerCase().split(/\s+/)[0];
+    for (const r of results) {
+      if (!r.snippet || r.snippet.length < 20) continue;
+      if (r.link?.includes('booking.com')) continue;
+      if (r.link?.includes('airbnb.')) continue;
+      // 相关性：至少包含餐厅名关键词
+      const text = `${r.title} ${r.snippet}`.toLowerCase();
+      if (!text.includes(nameKey)) continue;
+      localNotes.push({
+        title: r.title || '',
+        desc: r.snippet || '',
+        author: extractSource(r.link),
+        link: r.link || '',
+        lang: langConfig.hl,
+      });
+    }
+    console.log(`[Review] 本地语言(${langConfig.hl})搜索返回 ${localNotes.length} 条评价`);
+    return localNotes.slice(0, 8);
+  } catch (err) {
+    console.log(`[Review] 本地语言搜索失败: ${err.message}`);
+    return [];
+  }
 }
 
 function extractSource(url) {
@@ -110,11 +180,15 @@ function extractSource(url) {
   } catch { return ''; }
 }
 
-// DeepSeek API URL 构建
+// DeepSeek API URL 构建（兼容各种 BASE_URL 写法）
 function getDeepSeekUrl() {
-  const base = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
+  const base = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/$/, '');
+  // 已经是完整路径
   if (base.includes('/chat/completions')) return base;
-  return base.replace(/\/$/, '') + '/v1/chat/completions';
+  // 包含 /v1 但没有后续路径
+  if (base.endsWith('/v1')) return base + '/chat/completions';
+  // 只有域名
+  return base + '/v1/chat/completions';
 }
 
 // DeepSeek 关键词生成
@@ -137,11 +211,72 @@ async function generateKeywords(name, city) {
   return [name, `${name} ${city}`];
 }
 
-// DeepSeek 评价分析
-async function analyzeReviews(restaurantName, city, notes) {
+// DeepSeek 评价分析（双指数版本）
+async function analyzeReviews(restaurantName, city, notes, localNotes) {
   try {
-    const notesText = notes.map((n, i) => `[${i + 1}] 标题：${n.title}\n内容：${n.desc}`).join("\n\n");
-    const prompt = `你是帮助中国游客做海外餐厅决策的AI。目标餐厅：「${restaurantName}」（${city}）\n笔记：\n${notesText}\n\n请按JSON输出：{"relevantNoteCount":3,"rating":"recommend","summary":"一句话总结","chineseStomachIndex":{"score":4,"reason":"实质口味描述，禁止出现笔记[1]等指代"},"recommendedDishes":[{"name":"菜名","reason":"实质推荐理由，禁止笔记[1]提及类废话"}],"needReservation":"需要提前预约","pros":["..."],"cons":["..."],"practicalInfo":{"avgPrice":"...","waitTime":"...","paymentMethod":"...","tips":"..."},"adCount":0,"confidence":"high"}`;
+    const notesText = notes.map((n, i) => `[中文${i + 1}] 标题：${n.title}\n内容：${n.desc}`).join("\n\n");
+    const localNotesText = localNotes && localNotes.length > 0
+      ? localNotes.map((n, i) => `[本地${i + 1}] 标题：${n.title}\n内容：${n.desc}`).join("\n\n")
+      : "（暂无本地语言评价数据）";
+
+    const prompt = `你是一个帮中国游客挑餐厅的助手，说话要像朋友推荐一样自然口语化，不要用书面语。
+
+餐厅：「${restaurantName}」（${city}）
+
+===== 中文评价 =====
+${notesText}
+
+===== 本地语言评价 =====
+${localNotesText}
+
+重要：首先判断上面的评价内容是否真的在讨论「${restaurantName}」这家位于「${city}」的餐厅。如果评价内容明显是在说其他城市的同名餐厅、或者与这家店完全无关，请直接返回：
+{"rating": "no_data", "summary": "暂未找到这家餐厅的相关评价", "confidence": "low"}
+
+只有当评价内容确实与这家餐厅相关时，才输出完整分析JSON（所有文字必须口语化、像朋友聊天，严禁出现"中文评价提到""评论指出"等来源引用）：
+{
+  "rating": "strongly_recommend/recommend/caution/avoid",
+  "summary": "一句话，像朋友推荐那样说这家店值不值得去",
+
+  "chineseStomachIndex": {
+    "score": 1到5的整数,
+    "reason": "用一句大白话说适不适合中国人的口味，为什么。比如：'味道偏西式但不踩雷，大部分人能接受' 或 '口味偏重香料，不太适合清淡口的朋友'"
+  },
+
+  "localIndex": {
+    "score": 1到5的整数,
+    "reason": "用一句大白话说当地人认不认这家店。比如：'本地人常去的老店，口碑很稳' 或 '主要是游客在排队，本地人不太来'"
+  },
+
+  "recommendedDishes": [
+    {"name": "菜名", "reason": "为什么推荐，口语化"}
+  ],
+  "pros": ["好评要点，直接说结论"],
+  "cons": ["差评要点，仅限味道/服务/卫生等真实体验问题"],
+  "tips": ["实用提醒，如：记得提前预约、中午去不用排队"],
+  "practicalInfo": {
+    "avgPrice": "人均价格",
+    "waitTime": "等位时间",
+    "paymentMethod": "支付方式"
+  },
+  "confidence": "high/medium/low"
+}
+
+评分说明：
+【中国胃指数】1-5星，只看"中国人吃了会不会觉得好吃/习惯"：
+- 5星：口味很合中国人，热食多，有米饭面条，调味熟悉
+- 4星：大部分中国人能接受，偶尔有不太习惯的菜
+- 3星：需要挑着点，有些菜可能吃不惯
+- 2星：口味差异比较大，不少菜对中国胃是挑战
+- 1星：大部分中国人会吃不惯
+
+【本地指数】1-5星，只看"当地人认不认可这家店"（跟菜系无关！法餐、中餐、融合菜都可以是本地认可的好店）：
+- 5星：本地人的心头好，评价活跃且评分高，不是靠游客撑起来的
+- 4星：本地口碑不错，当地人会去吃
+- 3星：本地人和游客都有，不算特别本地也不算游客店
+- 2星：游客比本地人多，有点网红打卡的感觉
+- 1星：基本都是游客在去，本地人不太认
+
+重要：本地指数和菜系类型完全无关。一家法餐在巴黎、一家中餐在巴黎，都可以得5星本地指数，只要当地人真的认可它。`;
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -155,7 +290,7 @@ async function analyzeReviews(restaurantName, city, notes) {
     const response = await fetch(deepseekUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 1000 }),
+      body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500 }),
     });
 
     if (!response.ok) {
@@ -172,6 +307,7 @@ async function analyzeReviews(restaurantName, city, notes) {
     if (match) {
       const result = JSON.parse(match[0]);
       result.noteCount = notes.length;
+      result.localNoteCount = localNotes ? localNotes.length : 0;
       return result;
     }
     console.log(`[Review] DeepSeek 返回格式异常: ${text.slice(0, 100)}`);
@@ -193,7 +329,7 @@ function fallbackAnalyze(notes) {
   const priceMatch = texts.match(/人均[约]?(\d+)/);
   return {
     rating, ratingLabel, summary: `基于${notes.length}条笔记的分析`,
-    pros: [], cons: [],
+    pros: [], cons: [], tips: [],
     practicalInfo: { avgPrice: priceMatch ? `约${priceMatch[1]}元` : null },
     noteCount: notes.length, adCount: 0, confidence: "medium", analysisMode: "local",
   };
@@ -266,12 +402,16 @@ module.exports = async (req, res) => {
   const keywords = await generateKeywords(name, city);
   console.log(`[Review] 关键词: ${keywords.join(", ")}`);
 
-  // 中文评价采集（多通道）
-  const { notes, fallback, message, source } = await fetchXhsNotes(keywords, name, city);
-  console.log(`[Review] 采集到 ${notes.length} 条评价 [来源: ${source}]`);
+  // 并行获取：中文评价 + 本地语言评价
+  const [xhsResult, localNotes] = await Promise.all([
+    fetchXhsNotes(keywords, name, city),
+    fetchLocalReviews(name, city),
+  ]);
+  const { notes, fallback, message, source } = xhsResult;
+  console.log(`[Review] 采集到 ${notes.length} 条中文评价 [来源: ${source}], ${localNotes.length} 条本地评价`);
 
-  // AI 分析
-  const analysis = await analyzeReviews(name, city, notes);
+  // AI 分析（同时传入中文和本地评价）
+  const analysis = await analyzeReviews(name, city, notes, localNotes);
 
   const result = {
     restaurant: { name, city },
@@ -297,6 +437,7 @@ module.exports = async (req, res) => {
       analysisMode: analysis.analysisMode || "ai",
       noteSource: source,
       noteCount: notes.length,
+      localNoteCount: localNotes.length,
     },
   };
 
